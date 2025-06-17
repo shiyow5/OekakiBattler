@@ -37,7 +37,10 @@ git commit -m "新規ファイルを追加"
 git push origin Test
 ```
 
+## これからの流れ
+参考リンクの2.を実装してみる。
+
 ## 参考リンク
-[【ゲーム作成】Pythonでいらすとやのスマブラ風ゲームを作ります【pygame】](https://it-programming-beginner.com/2023/08/23/pygame-ssbu-01/)  
-[格闘ゲームをPygameで自作してみる](https://note.com/kakunik/n/n899af1ce8bfd) ← これ大事  
-[pygameを用いて簡単な格闘ゲームを自作してみた](https://qiita.com/kankitu_man/items/0c47e24aff11fee9022c)  
+1. [【ゲーム作成】Pythonでいらすとやのスマブラ風ゲームを作ります【pygame】](https://it-programming-beginner.com/2023/08/23/pygame-ssbu-01/)  
+2. [格闘ゲームをPygameで自作してみる](https://note.com/kakunik/n/n899af1ce8bfd)  
+3. [pygameを用いて簡単な格闘ゲームを自作してみた](https://qiita.com/kankitu_man/items/0c47e24aff11fee9022c)  
