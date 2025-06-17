@@ -2,7 +2,13 @@
 
 ## Gitの使い方
 ### レポジトリのクローン
-`git clone git@github.com:shiyow5/OekakiBattler.git`
+`git clone git@github.com:shiyow5/OekakiBattler.git`  
+
+### ブランチの作成
+`git checkout -b <ブランチ名>`  
+
+### ブランチの切り替え
+`git checkout <ブランチ名>`  
 
 ## 参考リンク
 [【ゲーム作成】Pythonでいらすとやのスマブラ風ゲームを作ります【pygame】](https://it-programming-beginner.com/2023/08/23/pygame-ssbu-01/)  
