@@ -1,5 +1,9 @@
 # お絵描きバトラー
 
+## Gitの使い方
+### レポジトリのクローン
+`git clone git@github.com:shiyow5/OekakiBattler.git`
+
 ## 参考リンク
 [【ゲーム作成】Pythonでいらすとやのスマブラ風ゲームを作ります【pygame】](https://it-programming-beginner.com/2023/08/23/pygame-ssbu-01/)  
 [格闘ゲームをPygameで自作してみる](https://note.com/kakunik/n/n899af1ce8bfd)  
