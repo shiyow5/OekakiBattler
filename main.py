@@ -41,6 +41,14 @@ def main():
         initialize_database()
         logger.info("Database initialized successfully")
         
+        # Initialize settings manager
+        print("Loading settings...")
+        from src.services.settings_manager import settings_manager
+        from src.services.audio_manager import audio_manager
+        settings_manager.update_settings_class()
+        settings_manager.apply_to_audio_manager(audio_manager)
+        logger.info("Settings loaded and applied")
+        
         # Check if API key is configured
         if not Settings.GOOGLE_API_KEY:
             print("⚠️  Warning: Google API key not found in .env file")
@@ -62,6 +70,7 @@ def main():
         def on_closing():
             try:
                 app.cleanup()
+                audio_manager.cleanup()
             except:
                 pass
             root.destroy()

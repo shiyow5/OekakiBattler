@@ -22,17 +22,35 @@ class MainMenuWindow:
     """Main application window"""
     
     def __init__(self, root: tk.Tk):
+        logger.info("MainMenuWindow.__init__: Starting initialization")
+        
         self.root = root
         self.root.title("お絵描きバトラー - Oekaki Battler")
         self.root.geometry("900x700")
+        logger.info("MainMenuWindow.__init__: Basic window setup complete")
         
         # Services
+        logger.info("MainMenuWindow.__init__: Initializing database manager")
         self.db_manager = DatabaseManager()
+        logger.info("MainMenuWindow.__init__: Initializing image processor")
         self.image_processor = ImageProcessor()
+        logger.info("MainMenuWindow.__init__: Initializing AI analyzer")
         self.ai_analyzer = AIAnalyzer()
+        logger.info("MainMenuWindow.__init__: Initializing battle engine")
         self.battle_engine = BattleEngine()
+        logger.info("MainMenuWindow.__init__: All services initialized")
+        
+        # Apply current settings to battle engine
+        logger.info("MainMenuWindow.__init__: Applying settings to battle engine")
+        try:
+            from src.services.settings_manager import settings_manager
+            settings_manager.apply_to_battle_engine(self.battle_engine)
+        except Exception as e:
+            logger.warning(f"Could not apply settings to battle engine: {e}")
+        logger.info("MainMenuWindow.__init__: Settings applied")
         
         # Data
+        logger.info("MainMenuWindow.__init__: Initializing data structures")
         self.characters = []
         self.selected_character1 = None
         self.selected_character2 = None
@@ -40,51 +58,79 @@ class MainMenuWindow:
         # Status
         self.status_var = tk.StringVar()
         self.status_var.set("Ready")
+        logger.info("MainMenuWindow.__init__: Data structures initialized")
         
         # Setup GUI
+        logger.info("MainMenuWindow.__init__: Setting up styles")
         self._setup_styles()
+        logger.info("MainMenuWindow.__init__: Creating widgets")
         self._create_widgets()
+        logger.info("MainMenuWindow.__init__: Loading characters")
         self._load_characters()
         
         logger.info("Main menu window initialized")
     
     def _setup_styles(self):
         """Setup custom styles"""
+        logger.info("MainMenuWindow._setup_styles: Creating ttk.Style")
         self.style = ttk.Style()
+        logger.info("MainMenuWindow._setup_styles: Setting theme to clam")
         self.style.theme_use('clam')
         
-        # Custom button styles
-        self.style.configure('Title.TLabel', font=('Arial', 16, 'bold'))
-        self.style.configure('Header.TLabel', font=('Arial', 12, 'bold'))
-        self.style.configure('Action.TButton', font=('Arial', 10, 'bold'))
+        logger.info("MainMenuWindow._setup_styles: Configuring custom button styles")
+        # Custom button styles - with safer configuration
+        try:
+            self.style.configure('Title.TLabel', font=('Arial', 16, 'bold'))
+            logger.info("MainMenuWindow._setup_styles: Title.TLabel style configured")
+            
+            self.style.configure('Header.TLabel', font=('Arial', 12, 'bold'))
+            logger.info("MainMenuWindow._setup_styles: Header.TLabel style configured")
+            
+            # Avoid Action.TButton for now - it may be causing segfaults
+            # self.style.configure('Action.TButton', font=('Arial', 10, 'bold'))
+            logger.info("MainMenuWindow._setup_styles: Skipped Action.TButton to avoid segfault")
+            
+        except Exception as e:
+            logger.error(f"MainMenuWindow._setup_styles: Error configuring styles: {e}")
+        
+        logger.info("MainMenuWindow._setup_styles: Styles setup complete")
     
     def _create_widgets(self):
         """Create main GUI widgets"""
+        logger.info("MainMenuWindow._create_widgets: Creating main container")
         # Main container
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
+        logger.info("MainMenuWindow._create_widgets: Configuring grid weights")
         # Configure grid weights
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(1, weight=1)
         
+        logger.info("MainMenuWindow._create_widgets: Creating title label")
         # Title
         title_label = ttk.Label(main_frame, text="🎨 お絵描きバトラー", style='Title.TLabel')
         title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
         
+        logger.info("MainMenuWindow._create_widgets: Creating action panel")
         # Left panel - Actions
         self._create_action_panel(main_frame)
         
+        logger.info("MainMenuWindow._create_widgets: Creating character panel")
         # Middle panel - Character list
         self._create_character_panel(main_frame)
         
+        logger.info("MainMenuWindow._create_widgets: Creating battle panel")
         # Right panel - Battle setup
         self._create_battle_panel(main_frame)
         
+        logger.info("MainMenuWindow._create_widgets: Creating status panel")
         # Bottom panel - Status and controls
         self._create_status_panel(main_frame)
+        
+        logger.info("MainMenuWindow._create_widgets: All widgets created")
     
     def _create_action_panel(self, parent):
         """Create action buttons panel"""
@@ -97,6 +143,14 @@ class MainMenuWindow:
             text="📷 Register Character",
             command=self._register_character,
             style='Action.TButton',
+            width=20
+        ).pack(pady=5, fill=tk.X)
+        
+        # Character deletion
+        ttk.Button(
+            action_frame,
+            text="🗑️ Delete Character",
+            command=self._delete_character,
             width=20
         ).pack(pady=5, fill=tk.X)
         
@@ -156,9 +210,18 @@ class MainMenuWindow:
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
         
-        # Treeview for characters
+        # Treeview for characters (supports Japanese names)
         columns = ('Name', 'HP', 'ATK', 'DEF', 'SPD', 'MAG', 'Battles', 'Wins')
         self.char_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15)
+        
+        # Configure font to support Japanese characters in character list
+        try:
+            import tkinter.font as tkFont
+            tree_font = tkFont.Font(family="Yu Gothic", size=9)
+            self.style.configure("Japanese.Treeview", font=tree_font)
+            self.char_tree.configure(style="Japanese.Treeview")
+        except:
+            pass
         
         # Configure columns
         self.char_tree.heading('Name', text='Name')
@@ -203,47 +266,104 @@ class MainMenuWindow:
     
     def _create_battle_panel(self, parent):
         """Create battle setup panel"""
+        logger.info("MainMenuWindow._create_battle_panel: Creating battle frame")
         battle_frame = ttk.LabelFrame(parent, text="Battle Arena", padding="10")
         battle_frame.grid(row=1, column=2, sticky=(tk.W, tk.E, tk.N), padx=(10, 0))
         
+        logger.info("MainMenuWindow._create_battle_panel: Creating Fighter 1 elements")
         # Fighter 1
         ttk.Label(battle_frame, text="Fighter 1:", style='Header.TLabel').pack(anchor=tk.W)
         self.fighter1_var = tk.StringVar()
         self.fighter1_combo = ttk.Combobox(battle_frame, textvariable=self.fighter1_var, state='readonly')
         self.fighter1_combo.pack(fill=tk.X, pady=(5, 10))
         
+        logger.info("MainMenuWindow._create_battle_panel: Configuring Japanese font for comboboxes")
+        # Configure Japanese font for comboboxes - with safer handling
+        try:
+            import tkinter.font as tkFont
+            logger.info("MainMenuWindow._create_battle_panel: Importing tkinter.font successful")
+            
+            # Try multiple Japanese fonts as fallbacks
+            japanese_fonts = ["Yu Gothic", "Meiryo", "MS Gothic", "DejaVu Sans"]
+            combo_font = None
+            
+            for font_family in japanese_fonts:
+                try:
+                    logger.info(f"MainMenuWindow._create_battle_panel: Trying font {font_family}")
+                    combo_font = tkFont.Font(family=font_family, size=9)
+                    logger.info(f"MainMenuWindow._create_battle_panel: Font {font_family} created successfully")
+                    break
+                except Exception as font_e:
+                    logger.warning(f"MainMenuWindow._create_battle_panel: Font {font_family} failed: {font_e}")
+                    continue
+            
+            if combo_font:
+                logger.info("MainMenuWindow._create_battle_panel: Configuring Japanese.TCombobox style")
+                self.style.configure("Japanese.TCombobox", font=combo_font)
+                self.fighter1_combo.configure(style="Japanese.TCombobox")
+                logger.info("MainMenuWindow._create_battle_panel: Fighter1 combo font configured")
+            else:
+                logger.warning("MainMenuWindow._create_battle_panel: No Japanese font available, using default")
+        except Exception as e:
+            logger.error(f"MainMenuWindow._create_battle_panel: Font configuration error: {e}")
+        
+        logger.info("MainMenuWindow._create_battle_panel: Creating VS label")
         # VS label
         vs_label = ttk.Label(battle_frame, text="🆚", font=('Arial', 20))
         vs_label.pack(pady=10)
         
+        logger.info("MainMenuWindow._create_battle_panel: Creating Fighter 2 elements")
         # Fighter 2
         ttk.Label(battle_frame, text="Fighter 2:", style='Header.TLabel').pack(anchor=tk.W)
         self.fighter2_var = tk.StringVar()
         self.fighter2_combo = ttk.Combobox(battle_frame, textvariable=self.fighter2_var, state='readonly')
         self.fighter2_combo.pack(fill=tk.X, pady=(5, 15))
         
-        # Battle options
-        options_frame = ttk.LabelFrame(battle_frame, text="Battle Options", padding="5")
-        options_frame.pack(fill=tk.X, pady=10)
+        logger.info("MainMenuWindow._create_battle_panel: Configuring Fighter 2 combo font")
+        # Configure Japanese font for fighter 2 combobox
+        try:
+            self.fighter2_combo.configure(style="Japanese.TCombobox")
+            logger.info("MainMenuWindow._create_battle_panel: Fighter2 combo font configured")
+        except Exception as e:
+            logger.warning(f"MainMenuWindow._create_battle_panel: Fighter2 font config failed: {e}")
         
+        logger.info("MainMenuWindow._create_battle_panel: Creating battle options (simplified)")
+        # Simplified battle options to avoid ttk.LabelFrame issues
         self.visual_mode_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(options_frame, text="Visual Mode", variable=self.visual_mode_var).pack(anchor=tk.W)
+        logger.info("MainMenuWindow._create_battle_panel: Creating simple checkbutton")
+        ttk.Checkbutton(battle_frame, text="Visual Mode", variable=self.visual_mode_var).pack(anchor=tk.W, pady=10)
+        logger.info("MainMenuWindow._create_battle_panel: Battle options created successfully")
         
-        # Battle button
+        logger.info("MainMenuWindow._create_battle_panel: Creating battle button")
+        # Battle button - without problematic custom style
+        logger.info("MainMenuWindow._create_battle_panel: Creating ttk.Button without custom style")
         self.battle_button = ttk.Button(
             battle_frame,
             text="⚔️ START BATTLE!",
-            command=self._start_battle,
-            style='Action.TButton'
+            command=self._start_battle
         )
         self.battle_button.pack(pady=15, fill=tk.X)
+        logger.info("MainMenuWindow._create_battle_panel: Battle button created successfully")
         
+        logger.info("MainMenuWindow._create_battle_panel: Creating random battle button")
         # Random battle button
-        ttk.Button(
-            battle_frame,
-            text="🎲 Random Battle",
-            command=self._random_battle
-        ).pack(pady=5, fill=tk.X)
+        try:
+            ttk.Button(
+                battle_frame,
+                text="🎲 Random Battle",
+                command=self._random_battle
+            ).pack(pady=5, fill=tk.X)
+            logger.info("MainMenuWindow._create_battle_panel: Random battle button created successfully")
+        except Exception as e:
+            logger.error(f"MainMenuWindow._create_battle_panel: Error creating random battle button: {e}")
+            # Simple fallback
+            ttk.Button(
+                battle_frame,
+                text="Random Battle",
+                command=self._random_battle
+            ).pack(pady=5, fill=tk.X)
+        
+        logger.info("MainMenuWindow._create_battle_panel: Battle panel creation complete")
     
     def _create_status_panel(self, parent):
         """Create status panel"""
@@ -366,6 +486,14 @@ class MainMenuWindow:
         try:
             self.status_var.set(f"Battle: {char1.name} vs {char2.name}")
             
+            # Apply latest settings to battle engine
+            try:
+                from src.services.settings_manager import settings_manager
+                settings_manager.apply_to_battle_engine(self.battle_engine)
+                logger.debug(f"Applied battle speed: {self.battle_engine.battle_speed}")
+            except Exception as e:
+                logger.warning(f"Could not apply settings to battle engine: {e}")
+            
             # Start battle
             battle = self.battle_engine.start_battle(char1, char2, visual_mode)
             
@@ -403,6 +531,81 @@ class MainMenuWindow:
             # Re-enable controls after battle
             pass
     
+    def _delete_character(self):
+        """Delete selected character"""
+        try:
+            # Get selected character
+            selection = self.char_tree.selection()
+            if not selection:
+                messagebox.showwarning("Warning", "キャラクターを選択してください / Please select a character to delete")
+                return
+            
+            item = selection[0]
+            character_name = self.char_tree.item(item, "values")[0]
+            
+            # Find character in list
+            character = next((char for char in self.characters if char.name == character_name), None)
+            if not character:
+                messagebox.showerror("Error", "キャラクターが見つかりません / Character not found")
+                return
+            
+            # Check battle count
+            battle_count = self.db_manager.get_character_battle_count(character.id)
+            
+            # Create confirmation message
+            if battle_count > 0:
+                confirm_msg = (
+                    f"'{character.name}' を削除してもよろしいですか？\n"
+                    f"Are you sure you want to delete '{character.name}'?\n\n"
+                    f"⚠️ このキャラクターは {battle_count} 回のバトル履歴があります\n"
+                    f"⚠️ This character has {battle_count} battle(s) in history\n\n"
+                    f"削除すると関連するバトル記録もすべて削除されます。\n"
+                    f"All related battle records will also be deleted.\n\n"
+                    f"この操作は取り消せません。\n"
+                    f"This action cannot be undone."
+                )
+                title = "バトル履歴削除の確認 / Confirm Deletion with Battle History"
+            else:
+                confirm_msg = (
+                    f"'{character.name}' を削除してもよろしいですか？\n"
+                    f"Are you sure you want to delete '{character.name}'?\n\n"
+                    f"この操作は取り消せません。\n"
+                    f"This action cannot be undone."
+                )
+                title = "削除の確認 / Confirm Deletion"
+            
+            # Show confirmation dialog
+            result = messagebox.askyesno(title, confirm_msg)
+            
+            if result:
+                # Attempt deletion with force_delete=True for characters with battle history
+                force_delete = battle_count > 0
+                
+                if self.db_manager.delete_character(character.id, force_delete=force_delete):
+                    if battle_count > 0:
+                        messagebox.showinfo(
+                            "削除完了 / Deletion Complete", 
+                            f"キャラクター '{character.name}' と {battle_count} 件のバトル履歴を削除しました。\n"
+                            f"Character '{character.name}' and {battle_count} battle record(s) deleted successfully."
+                        )
+                    else:
+                        messagebox.showinfo(
+                            "削除完了 / Deletion Complete", 
+                            f"キャラクター '{character.name}' を削除しました。\n"
+                            f"Character '{character.name}' deleted successfully."
+                        )
+                    self._load_characters()  # Refresh character list
+                else:
+                    messagebox.showerror(
+                        "削除失敗 / Deletion Failed", 
+                        f"キャラクター '{character.name}' の削除に失敗しました。\n"
+                        f"Failed to delete character '{character.name}'."
+                    )
+        
+        except Exception as e:
+            logger.error(f"Error deleting character: {e}")
+            messagebox.showerror("エラー / Error", f"キャラクター削除中にエラーが発生しました:\n{e}")
+
     def cleanup(self):
         """Clean up resources when application closes"""
         try:
@@ -520,10 +723,21 @@ class CharacterRegistrationDialog:
         details_frame = ttk.LabelFrame(main_frame, text="Character Details", padding="10")
         details_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
-        # Name
-        ttk.Label(details_frame, text="Name:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        # Name (supports Japanese and English characters)
+        ttk.Label(details_frame, text="Name (名前):").grid(row=0, column=0, sticky=tk.W, pady=5)
         self.name_var = tk.StringVar()
-        ttk.Entry(details_frame, textvariable=self.name_var, width=30).grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=5)
+        name_entry = ttk.Entry(details_frame, textvariable=self.name_var, width=30)
+        name_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=5)
+        
+        # Configure font to support Japanese characters
+        try:
+            # Try to use a font that supports Japanese
+            import tkinter.font as tkFont
+            japanese_font = tkFont.Font(family="Yu Gothic", size=10)
+            name_entry.configure(font=japanese_font)
+        except:
+            # Fallback to default font if Japanese font not available
+            pass
         
         # Stats (will be filled by AI)
         stats_frame = ttk.LabelFrame(details_frame, text="Stats (Auto-generated by AI)", padding="10")
@@ -550,10 +764,16 @@ class CharacterRegistrationDialog:
         ttk.Label(stats_frame, text="Magic:").grid(row=2, column=0, sticky=tk.W)
         ttk.Entry(stats_frame, textvariable=self.magic_var, width=10, state='readonly').grid(row=2, column=1, sticky=tk.W, padx=(10, 20))
         
-        # Description
-        ttk.Label(details_frame, text="Description:").grid(row=2, column=0, sticky=(tk.W, tk.N), pady=(10, 0))
+        # Description (supports Japanese and English)
+        ttk.Label(details_frame, text="Description (説明):").grid(row=2, column=0, sticky=(tk.W, tk.N), pady=(10, 0))
         self.description_text = tk.Text(details_frame, height=4, width=50, wrap=tk.WORD)
         self.description_text.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(10, 0), pady=(10, 0))
+        
+        # Configure font to support Japanese characters
+        try:
+            self.description_text.configure(font=japanese_font)
+        except:
+            pass
         
         details_frame.columnconfigure(1, weight=1)
         
@@ -594,7 +814,11 @@ class CharacterRegistrationDialog:
                 return
             
             # Disable button during analysis
-            self.dialog.config(cursor="wait")
+            try:
+                self.dialog.config(cursor="watch")  # Use "watch" instead of "wait"
+            except tk.TclError:
+                # Fallback to "arrow" if "watch" is not available
+                self.dialog.config(cursor="arrow")
             
             def analyze():
                 try:
@@ -608,14 +832,14 @@ class CharacterRegistrationDialog:
                 except Exception as e:
                     self.dialog.after(0, lambda: messagebox.showerror("Error", f"Analysis failed: {e}"))
                 finally:
-                    self.dialog.after(0, lambda: self.dialog.config(cursor=""))
+                    self.dialog.after(0, lambda: self._reset_cursor())
             
             threading.Thread(target=analyze, daemon=True).start()
             
         except Exception as e:
             logger.error(f"Error analyzing image: {e}")
             messagebox.showerror("Error", f"Failed to analyze image: {e}")
-            self.dialog.config(cursor="")
+            self._reset_cursor()
     
     def _update_stats(self, stats):
         """Update stats display"""
@@ -670,7 +894,11 @@ class CharacterRegistrationDialog:
             description = self.description_text.get(1.0, tk.END).strip()
             
             # Process image and create character
-            self.dialog.config(cursor="wait")
+            try:
+                self.dialog.config(cursor="watch")  # Use "watch" instead of "wait"
+            except tk.TclError:
+                # Fallback to "arrow" if "watch" is not available
+                self.dialog.config(cursor="arrow")
             
             def register():
                 try:
@@ -709,14 +937,22 @@ class CharacterRegistrationDialog:
                 except Exception as e:
                     self.dialog.after(0, lambda: messagebox.showerror("Error", f"Registration failed: {e}"))
                 finally:
-                    self.dialog.after(0, lambda: self.dialog.config(cursor=""))
+                    self.dialog.after(0, lambda: self._reset_cursor())
             
             threading.Thread(target=register, daemon=True).start()
             
         except Exception as e:
             logger.error(f"Error registering character: {e}")
             messagebox.showerror("Error", f"Failed to register character: {e}")
+            self._reset_cursor()
+    
+    def _reset_cursor(self):
+        """Reset cursor to default"""
+        try:
             self.dialog.config(cursor="")
+        except (tk.TclError, AttributeError):
+            # If the dialog is destroyed or cursor reset fails, ignore
+            pass
 
 
 # Placeholder classes for other windows
@@ -936,35 +1172,60 @@ class BattleHistoryWindow:
             
             # Add battles to tree
             for battle in battles:
-                # Get character names
-                char1 = self.db_manager.get_character(battle.character1_id)
-                char2 = self.db_manager.get_character(battle.character2_id)
-                
-                char1_name = char1.name if char1 else "Unknown"
-                char2_name = char2.name if char2 else "Unknown"
-                
-                # Determine winner name
-                if battle.winner_id:
-                    if battle.winner_id == battle.character1_id:
-                        winner_name = char1_name
-                    elif battle.winner_id == battle.character2_id:
-                        winner_name = char2_name
-                    else:
-                        winner_name = "Unknown"
-                else:
+                try:
+                    # Get character names safely
+                    char1 = None
+                    char2 = None
+                    try:
+                        char1 = self.db_manager.get_character(battle.character1_id)
+                        char2 = self.db_manager.get_character(battle.character2_id)
+                    except Exception as char_e:
+                        logger.warning(f"Error getting character data: {char_e}")
+                    
+                    char1_name = char1.name if char1 else "Unknown"
+                    char2_name = char2.name if char2 else "Unknown"
+                    
+                    # Determine winner name safely
                     winner_name = "引き分け"
-                
-                # Format date
-                date_str = battle.created_at.strftime("%m/%d %H:%M")
-                
-                # Insert into tree
-                self.tree.insert("", tk.END, 
-                               text=battle.id[:8],
-                               values=(date_str, char1_name, char2_name, winner_name, 
-                                     f"{battle.duration:.2f}", len(battle.turns)))
-                
+                    if battle.winner_id:
+                        if battle.winner_id == battle.character1_id:
+                            winner_name = char1_name
+                        elif battle.winner_id == battle.character2_id:
+                            winner_name = char2_name
+                        else:
+                            winner_name = "Unknown"
+                    
+                    # Format date safely
+                    try:
+                        date_str = battle.created_at.strftime("%m/%d %H:%M")
+                    except Exception:
+                        date_str = "Unknown"
+                    
+                    # Get turn count safely
+                    turn_count = 0
+                    try:
+                        turn_count = len(battle.turns) if battle.turns else 0
+                    except Exception:
+                        turn_count = 0
+                    
+                    # Insert into tree
+                    self.tree.insert("", tk.END, 
+                                   text=battle.id[:8] if battle.id else "Unknown",
+                                   values=(date_str, char1_name, char2_name, winner_name, 
+                                         f"{battle.duration:.2f}" if battle.duration else "0.00", 
+                                         turn_count))
+                except Exception as battle_e:
+                    logger.warning(f"Error processing battle {battle.id if battle else 'Unknown'}: {battle_e}")
+                    continue
+                    
         except Exception as e:
             logger.error(f"Error loading battle history: {e}")
+            # Show error message to user
+            try:
+                import tkinter.messagebox as messagebox
+                messagebox.showerror("エラー", f"バトル履歴の読み込みに失敗しました: {e}")
+            except:
+                pass
     
     def _refresh_history(self):
         """Refresh battle history"""
@@ -976,66 +1237,136 @@ class BattleHistoryWindow:
     
     def _on_battle_select(self, event=None):
         """Handle battle selection"""
-        selection = self.tree.selection()
-        if not selection:
-            return
-            
-        item = self.tree.item(selection[0])
-        battle_id_short = item['text']
-        
-        # Find full battle by short ID
         try:
-            battles = self.db_manager.get_recent_battles(limit=100)
-            selected_battle = None
+            selection = self.tree.selection()
+            if not selection:
+                return
+                
+            item = self.tree.item(selection[0])
+            battle_id_short = item.get('text', '')
             
-            for battle in battles:
-                if battle.id.startswith(battle_id_short):
-                    selected_battle = battle
-                    break
+            if not battle_id_short or battle_id_short == "Unknown":
+                self._show_detail_error("無効なバトルIDです")
+                return
             
-            if selected_battle:
-                self._display_battle_details(selected_battle)
+            # Find full battle by short ID
+            try:
+                battles = self.db_manager.get_recent_battles(limit=100)
+                selected_battle = None
+                
+                for battle in battles:
+                    if battle and battle.id and battle.id.startswith(battle_id_short):
+                        selected_battle = battle
+                        break
+                
+                if selected_battle:
+                    self._display_battle_details(selected_battle)
+                else:
+                    self._show_detail_error("バトルデータが見つかりません")
+                    
+            except Exception as db_e:
+                logger.error(f"Error retrieving battle data: {db_e}")
+                self._show_detail_error(f"データベースエラー: {db_e}")
                 
         except Exception as e:
-            logger.error(f"Error displaying battle details: {e}")
+            logger.error(f"Error handling battle selection: {e}")
+            self._show_detail_error(f"選択エラー: {e}")
     
     def _display_battle_details(self, battle):
         """Display detailed information about selected battle"""
         try:
-            # Get character details
-            char1 = self.db_manager.get_character(battle.character1_id)
-            char2 = self.db_manager.get_character(battle.character2_id)
+            if not battle:
+                self._show_detail_error("バトルデータが見つかりません")
+                return
+                
+            # Get character details safely
+            char1 = None
+            char2 = None
+            try:
+                char1 = self.db_manager.get_character(battle.character1_id) if battle.character1_id else None
+                char2 = self.db_manager.get_character(battle.character2_id) if battle.character2_id else None
+            except Exception as char_e:
+                logger.warning(f"Error getting character details: {char_e}")
             
-            char1_name = char1.name if char1 else "Unknown"
-            char2_name = char2.name if char2 else "Unknown"
+            char1_name = char1.name if char1 else "Unknown Character"
+            char2_name = char2.name if char2 else "Unknown Character"
             
-            # Prepare detail text
+            # Prepare detail text safely
             details = []
-            details.append(f"バトルID: {battle.id}")
-            details.append(f"日時: {battle.created_at.strftime('%Y年%m月%d日 %H:%M:%S')}")
-            details.append(f"対戦: {char1_name} VS {char2_name}")
-            details.append(f"勝者: {char1_name if battle.winner_id == battle.character1_id else char2_name if battle.winner_id == battle.character2_id else '引き分け'}")
-            details.append(f"バトル時間: {battle.duration:.2f}秒")
-            details.append(f"総ターン数: {len(battle.turns)}")
-            details.append("")
-            details.append("=== バトルログ ===")
-            
-            # Add battle log
-            for log_entry in battle.battle_log:
-                details.append(log_entry)
-            
-            # Update detail text
-            self.detail_text.config(state=tk.NORMAL)
-            self.detail_text.delete(1.0, tk.END)
-            self.detail_text.insert(1.0, "\n".join(details))
-            self.detail_text.config(state=tk.DISABLED)
+            try:
+                details.append(f"バトルID: {battle.id if battle.id else 'Unknown'}")
+                
+                # Format date safely
+                if battle.created_at:
+                    try:
+                        date_str = battle.created_at.strftime('%Y年%m月%d日 %H:%M:%S')
+                        details.append(f"日時: {date_str}")
+                    except Exception:
+                        details.append("日時: Unknown")
+                else:
+                    details.append("日時: Unknown")
+                
+                details.append(f"対戦: {char1_name} VS {char2_name}")
+                
+                # Determine winner safely
+                winner_name = "引き分け"
+                if battle.winner_id:
+                    if battle.winner_id == battle.character1_id:
+                        winner_name = char1_name
+                    elif battle.winner_id == battle.character2_id:
+                        winner_name = char2_name
+                    else:
+                        winner_name = "Unknown Winner"
+                
+                details.append(f"勝者: {winner_name}")
+                details.append(f"バトル時間: {battle.duration:.2f}秒" if battle.duration else "バトル時間: Unknown")
+                
+                # Get turn count safely
+                turn_count = 0
+                try:
+                    turn_count = len(battle.turns) if battle.turns else 0
+                except Exception:
+                    turn_count = 0
+                
+                details.append(f"総ターン数: {turn_count}")
+                details.append("")
+                details.append("=== バトルログ ===")
+                
+                # Add battle log safely
+                if battle.battle_log:
+                    try:
+                        for log_entry in battle.battle_log:
+                            if log_entry:  # Only add non-empty entries
+                                details.append(str(log_entry))
+                    except Exception as log_e:
+                        logger.warning(f"Error processing battle log: {log_e}")
+                        details.append("ログ表示エラー")
+                else:
+                    details.append("バトルログなし")
+                
+                # Update detail text
+                self.detail_text.config(state=tk.NORMAL)
+                self.detail_text.delete(1.0, tk.END)
+                self.detail_text.insert(1.0, "\n".join(details))
+                self.detail_text.config(state=tk.DISABLED)
+                
+            except Exception as detail_e:
+                logger.error(f"Error preparing battle details: {detail_e}")
+                self._show_detail_error(f"詳細処理エラー: {detail_e}")
             
         except Exception as e:
             logger.error(f"Error displaying battle details: {e}")
+            self._show_detail_error(f"詳細表示エラー: {e}")
+    
+    def _show_detail_error(self, message):
+        """Show error message in detail text"""
+        try:
             self.detail_text.config(state=tk.NORMAL)
             self.detail_text.delete(1.0, tk.END)
-            self.detail_text.insert(1.0, f"詳細表示エラー: {e}")
+            self.detail_text.insert(1.0, message)
             self.detail_text.config(state=tk.DISABLED)
+        except Exception as e:
+            logger.error(f"Error showing detail error: {e}")
 
 class SettingsWindow:
     def __init__(self, parent):
@@ -1056,18 +1387,8 @@ class SettingsWindow:
     
     def _load_settings(self):
         """Load current settings"""
-        from config.settings import Settings
-        return {
-            'battle_speed': getattr(Settings, 'BATTLE_SPEED', 2.0),
-            'max_turns': getattr(Settings, 'MAX_TURNS', 50),
-            'critical_chance': getattr(Settings, 'CRITICAL_CHANCE', 0.15),
-            'screen_width': getattr(Settings, 'SCREEN_WIDTH', 800),
-            'screen_height': getattr(Settings, 'SCREEN_HEIGHT', 600),
-            'fps': getattr(Settings, 'FPS', 60),
-            'auto_save_battles': True,
-            'show_battle_animations': True,
-            'japanese_ui': True,
-        }
+        from src.services.settings_manager import settings_manager
+        return settings_manager.current_settings.copy()
     
     def _create_widgets(self):
         """Create settings window widgets"""
@@ -1096,6 +1417,9 @@ class SettingsWindow:
         # Display settings  
         self._create_display_settings(main_frame)
         
+        # Audio settings
+        self._create_audio_settings(main_frame)
+        
         # General settings
         self._create_general_settings(main_frame)
         
@@ -1117,7 +1441,7 @@ class SettingsWindow:
         ttk.Label(speed_frame, text="バトル速度:").pack(side=tk.LEFT)
         
         self.battle_speed_var = tk.DoubleVar(value=self.settings['battle_speed'])
-        speed_scale = tk.Scale(speed_frame, from_=0.5, to=5.0, resolution=0.1, 
+        speed_scale = tk.Scale(speed_frame, from_=0.01, to=3.0, resolution=0.01, 
                               orient=tk.HORIZONTAL, variable=self.battle_speed_var)
         speed_scale.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 0))
         
@@ -1182,6 +1506,46 @@ class SettingsWindow:
         ttk.Checkbutton(display_frame, text="バトルアニメーションを表示", 
                        variable=self.show_animations_var).pack(anchor=tk.W, pady=5)
     
+    def _create_audio_settings(self, parent):
+        """Create audio settings section"""
+        audio_frame = ttk.LabelFrame(parent, text="🔊 オーディオ設定", padding=15)
+        audio_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
+        
+        # Enable sound
+        self.enable_sound_var = tk.BooleanVar(value=self.settings['enable_sound'])
+        ttk.Checkbutton(audio_frame, text="サウンドを有効にする", 
+                       variable=self.enable_sound_var).pack(anchor=tk.W, pady=5)
+        
+        # Master volume
+        master_frame = ttk.Frame(audio_frame)
+        master_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(master_frame, text="マスター音量:").pack(side=tk.LEFT)
+        
+        self.master_volume_var = tk.DoubleVar(value=self.settings['master_volume'])
+        master_scale = tk.Scale(master_frame, from_=0.0, to=1.0, resolution=0.05,
+                               orient=tk.HORIZONTAL, variable=self.master_volume_var)
+        master_scale.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 0))
+        
+        # BGM volume
+        bgm_frame = ttk.Frame(audio_frame)
+        bgm_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(bgm_frame, text="BGM音量:").pack(side=tk.LEFT)
+        
+        self.bgm_volume_var = tk.DoubleVar(value=self.settings['bgm_volume'])
+        bgm_scale = tk.Scale(bgm_frame, from_=0.0, to=1.0, resolution=0.05,
+                            orient=tk.HORIZONTAL, variable=self.bgm_volume_var)
+        bgm_scale.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 0))
+        
+        # SFX volume
+        sfx_frame = ttk.Frame(audio_frame)
+        sfx_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(sfx_frame, text="効果音音量:").pack(side=tk.LEFT)
+        
+        self.sfx_volume_var = tk.DoubleVar(value=self.settings['sfx_volume'])
+        sfx_scale = tk.Scale(sfx_frame, from_=0.0, to=1.0, resolution=0.05,
+                            orient=tk.HORIZONTAL, variable=self.sfx_volume_var)
+        sfx_scale.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 0))
+    
     def _create_general_settings(self, parent):
         """Create general settings section"""
         general_frame = ttk.LabelFrame(parent, text="🔧 一般設定", padding=15)
@@ -1231,20 +1595,30 @@ class SettingsWindow:
     def _reset_to_defaults(self):
         """Reset all settings to defaults"""
         if messagebox.askyesno("確認", "すべての設定をデフォルト値に戻しますか？"):
+            from src.services.settings_manager import settings_manager
+            
             # Reset to default values
-            self.battle_speed_var.set(2.0)
-            self.max_turns_var.set(50)
-            self.critical_chance_var.set(0.15)
-            self.screen_width_var.set(800)
-            self.screen_height_var.set(600)
-            self.fps_var.set(60)
-            self.auto_save_var.set(True)
-            self.show_animations_var.set(True)
-            self.japanese_ui_var.set(True)
+            defaults = settings_manager.default_settings
+            self.battle_speed_var.set(defaults['battle_speed'])
+            self.max_turns_var.set(defaults['max_turns'])
+            self.critical_chance_var.set(defaults['critical_chance'])
+            self.screen_width_var.set(defaults['screen_width'])
+            self.screen_height_var.set(defaults['screen_height'])
+            self.fps_var.set(defaults['fps'])
+            self.master_volume_var.set(defaults['master_volume'])
+            self.bgm_volume_var.set(defaults['bgm_volume'])
+            self.sfx_volume_var.set(defaults['sfx_volume'])
+            self.enable_sound_var.set(defaults['enable_sound'])
+            self.auto_save_var.set(defaults['auto_save_battles'])
+            self.show_animations_var.set(defaults['show_battle_animations'])
+            self.japanese_ui_var.set(defaults['japanese_ui'])
     
     def _save_settings(self):
         """Save settings"""
         try:
+            from src.services.settings_manager import settings_manager
+            from src.services.audio_manager import audio_manager
+            
             # Get new settings
             new_settings = {
                 'battle_speed': self.battle_speed_var.get(),
@@ -1253,26 +1627,34 @@ class SettingsWindow:
                 'screen_width': self.screen_width_var.get(),
                 'screen_height': self.screen_height_var.get(),
                 'fps': self.fps_var.get(),
+                'master_volume': self.master_volume_var.get(),
+                'bgm_volume': self.bgm_volume_var.get(),
+                'sfx_volume': self.sfx_volume_var.get(),
+                'enable_sound': self.enable_sound_var.get(),
                 'auto_save_battles': self.auto_save_var.get(),
                 'show_battle_animations': self.show_animations_var.get(),
                 'japanese_ui': self.japanese_ui_var.get(),
             }
             
-            # Here you would normally save to a config file
-            # For now, we'll just show a confirmation
-            messagebox.showinfo("設定保存", 
-                              "設定が保存されました。\n"
-                              "※一部の設定はアプリケーション再起動後に反映されます。")
+            # Save settings using settings manager
+            success = settings_manager.save_settings(new_settings)
             
-            # Apply some settings immediately if possible
-            try:
-                # Update battle engine settings if accessible
-                if hasattr(self.parent, 'battle_engine'):
-                    self.parent.battle_engine.battle_speed = new_settings['battle_speed']
-                    self.parent.battle_engine.max_turns = new_settings['max_turns']
-                    self.parent.battle_engine.critical_chance = new_settings['critical_chance']
-            except Exception as e:
-                logger.warning(f"Could not apply settings immediately: {e}")
+            if success:
+                # Update Settings class immediately
+                settings_manager.update_settings_class()
+                
+                # Apply settings to audio manager
+                settings_manager.apply_to_audio_manager(audio_manager)
+                
+                # Apply settings to battle engine if available
+                if hasattr(self.parent, 'battle_engine') and self.parent.battle_engine:
+                    settings_manager.apply_to_battle_engine(self.parent.battle_engine)
+                
+                messagebox.showinfo("設定保存", 
+                                  "設定が正常に保存され、適用されました。")
+            else:
+                messagebox.showerror("設定保存エラー", 
+                                   "設定の保存に失敗しました。")
             
             self.window.destroy()
             

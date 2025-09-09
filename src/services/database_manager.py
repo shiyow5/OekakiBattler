@@ -154,19 +154,49 @@ class DatabaseManager:
             logger.error(f"Error searching characters: {e}")
             return []
     
-    def delete_character(self, character_id: str) -> bool:
-        """Delete character from database"""
+    def delete_character(self, character_id: str, force_delete: bool = False) -> bool:
+        """Delete character from database
+        
+        Args:
+            character_id: ID of character to delete
+            force_delete: If True, delete character even if it has battle history
+        """
         try:
-            # First check if character exists in any battles
+            # Check if character exists in any battles
             battle_check = execute_query(
                 "SELECT COUNT(*) FROM battles WHERE character1_id = ? OR character2_id = ?",
                 (character_id, character_id)
             )
             
-            if battle_check and battle_check[0][0] > 0:
-                logger.warning(f"Cannot delete character {character_id}: has battle history")
+            battle_count = battle_check[0][0] if battle_check and battle_check[0] else 0
+            
+            if battle_count > 0 and not force_delete:
+                logger.warning(f"Cannot delete character {character_id}: has {battle_count} battle(s) in history. Use force_delete=True to override.")
                 return False
             
+            # If force_delete is True and character has battles, delete related data first
+            if force_delete and battle_count > 0:
+                logger.info(f"Force deleting character {character_id} with {battle_count} battle(s)")
+                
+                # Delete battle turns for all battles involving this character
+                execute_query(
+                    """DELETE FROM battle_turns 
+                       WHERE battle_id IN (
+                           SELECT id FROM battles 
+                           WHERE character1_id = ? OR character2_id = ?
+                       )""",
+                    (character_id, character_id)
+                )
+                
+                # Delete battles involving this character
+                execute_query(
+                    "DELETE FROM battles WHERE character1_id = ? OR character2_id = ?",
+                    (character_id, character_id)
+                )
+                
+                logger.info(f"Deleted {battle_count} battle(s) and related data for character {character_id}")
+            
+            # Delete the character
             query = "DELETE FROM characters WHERE id = ?"
             result = execute_query(query, (character_id,))
             
@@ -180,6 +210,18 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error deleting character: {e}")
             return False
+    
+    def get_character_battle_count(self, character_id: str) -> int:
+        """Get the number of battles a character has participated in"""
+        try:
+            battle_check = execute_query(
+                "SELECT COUNT(*) FROM battles WHERE character1_id = ? OR character2_id = ?",
+                (character_id, character_id)
+            )
+            return battle_check[0][0] if battle_check and battle_check[0] else 0
+        except Exception as e:
+            logger.error(f"Error getting battle count for character {character_id}: {e}")
+            return 0
     
     def save_battle(self, battle: Battle) -> bool:
         """Save battle to database"""
@@ -291,6 +333,10 @@ class DatabaseManager:
                     try:
                         battle_data = self._row_to_battle_dict(row)
                         battle = Battle.from_dict(battle_data)
+                        
+                        # Load battle turns
+                        self._load_battle_turns(battle)
+                        
                         battles.append(battle)
                     except Exception as e:
                         logger.warning(f"Error parsing battle row: {e}")
@@ -318,6 +364,10 @@ class DatabaseManager:
                     try:
                         battle_data = self._row_to_battle_dict(row)
                         battle = Battle.from_dict(battle_data)
+                        
+                        # Load battle turns
+                        self._load_battle_turns(battle)
+                        
                         battles.append(battle)
                     except Exception as e:
                         logger.warning(f"Error parsing battle row: {e}")
@@ -460,3 +510,22 @@ class DatabaseManager:
             'attacker_hp_after': row[9],
             'defender_hp_after': row[10]
         }
+    
+    def _load_battle_turns(self, battle: Battle):
+        """Load battle turns for a battle"""
+        try:
+            turns_query = """
+                SELECT * FROM battle_turns 
+                WHERE battle_id = ? 
+                ORDER BY turn_number
+            """
+            turns_result = execute_query(turns_query, (battle.id,))
+            
+            if turns_result:
+                for turn_row in turns_result:
+                    turn_data = self._row_to_turn_dict(turn_row)
+                    battle_turn = BattleTurn(**turn_data)
+                    battle.add_turn(battle_turn)
+                    
+        except Exception as e:
+            logger.warning(f"Error loading battle turns for {battle.id}: {e}")

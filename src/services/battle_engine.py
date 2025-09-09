@@ -10,6 +10,7 @@ import math
 from pathlib import Path
 from typing import Tuple, List, Optional
 from src.models import Character, Battle, BattleTurn, BattleResult
+from src.services.audio_manager import audio_manager
 from config.settings import Settings
 
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +26,7 @@ class BattleEngine:
         
         # Battle state
         self.current_battle = None
-        self.battle_speed = 2.0  # Battle animation speed multiplier (higher = faster)
+        self.battle_speed = 0.5  # Battle animation delay in seconds (lower = faster)
         
         # Pygame state - initialize only when needed
         self.pygame_initialized = False
@@ -38,16 +39,26 @@ class BattleEngine:
     def initialize_display(self) -> bool:
         """Initialize Pygame display for battle visualization"""
         try:
+            # Clean up any existing display first
+            if self.screen is not None:
+                try:
+                    pygame.display.quit()
+                    self.screen = None
+                except:
+                    pass
+            
             # Initialize Pygame if not already done
-            if not self.pygame_initialized:
+            if not pygame.get_init():
                 pygame.init()
                 self.pygame_initialized = True
                 logger.info("Pygame initialized")
             
-            # Initialize or reinitialize the display
-            if self.screen is None:
-                self.screen = pygame.display.set_mode((Settings.SCREEN_WIDTH, Settings.SCREEN_HEIGHT))
-                logger.info("Display created")
+            # Initialize audio and load default sounds
+            audio_manager.create_default_sounds()
+            
+            # Create new display
+            self.screen = pygame.display.set_mode((Settings.SCREEN_WIDTH, Settings.SCREEN_HEIGHT))
+            logger.info("New battle display created")
             
             pygame.display.set_caption("お絵描きバトラー - Battle Arena")
             
@@ -135,6 +146,11 @@ class BattleEngine:
             )
             self.current_battle = battle
             
+            # Start battle BGM if visual mode
+            if visual_mode:
+                # Try to play battle BGM (will create a simple one if no file exists)
+                self._start_battle_bgm()
+            
             # Initialize character HP for battle
             char1_current_hp = char1.hp
             char2_current_hp = char2.hp
@@ -187,7 +203,7 @@ class BattleEngine:
                     # Visual update
                     if visual_mode and self.screen:
                         self._update_battle_display(char1, char2, char1_current_hp, char2_current_hp, turn, battle.battle_log[-5:])
-                        time.sleep(1.0 / self.battle_speed)
+                        time.sleep(1.0 * self.battle_speed)
                     
                     # Check if battle should end
                     if char1_current_hp <= 0 or char2_current_hp <= 0:
@@ -219,6 +235,11 @@ class BattleEngine:
             battle.add_log_entry(f"🔄 総ターン数: {len(battle.turns)}")
             
             logger.info(f"Battle completed: Winner - {winner_name}")
+            
+            # Stop battle BGM and play victory sound
+            if visual_mode:
+                audio_manager.stop_bgm(fade_out=1000)  # 1 second fade out
+                audio_manager.play_sound("victory")
             
             # Final display update
             if visual_mode and self.screen:
@@ -419,21 +440,9 @@ class BattleEngine:
             char1_pos = (200, 300)
             char2_pos = (Settings.SCREEN_WIDTH - 200, 300)
             
-            # Draw characters (placeholder rectangles for now)
-            char1_rect = pygame.Rect(char1_pos[0] - 40, char1_pos[1] - 60, 80, 120)
-            char2_rect = pygame.Rect(char2_pos[0] - 40, char2_pos[1] - 60, 80, 120)
-            
-            # Color based on HP percentage
-            char1_hp_ratio = char1_hp / char1.hp
-            char2_hp_ratio = char2_hp / char2.hp
-            
-            char1_color = (255 * (1 - char1_hp_ratio), 255 * char1_hp_ratio, 0)
-            char2_color = (255 * (1 - char2_hp_ratio), 255 * char2_hp_ratio, 0)
-            
-            pygame.draw.rect(self.screen, char1_color, char1_rect)
-            pygame.draw.rect(self.screen, char2_color, char2_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), char1_rect, 2)
-            pygame.draw.rect(self.screen, (0, 0, 0), char2_rect, 2)
+            # Draw characters with images
+            self._draw_character(char1, char1_pos, char1_hp)
+            self._draw_character(char2, char2_pos, char2_hp)
             
             # Draw character names
             name1_surface = self.font.render(char1.name, True, (0, 0, 0))
@@ -444,6 +453,10 @@ class BattleEngine:
             # Draw HP bars
             hp_bar_width = 100
             hp_bar_height = 20
+            
+            # Calculate HP ratios
+            char1_hp_ratio = char1_hp / char1.hp
+            char2_hp_ratio = char2_hp / char2.hp
             
             # Character 1 HP bar
             hp1_bar_rect = pygame.Rect(char1_pos[0] - 50, char1_pos[1] - 80, hp_bar_width, hp_bar_height)
@@ -497,31 +510,286 @@ class BattleEngine:
             # Determine positions
             if turn.attacker_id == char1.id:
                 attacker_pos, defender_pos = char1_pos, char2_pos
+                attacker = char1
+                defender = char2
             else:
                 attacker_pos, defender_pos = char2_pos, char1_pos
+                attacker = char2
+                defender = char1
             
-            # Draw attack line/effect
-            if turn.action_type == "magic":
-                # Magic attack - draw sparkles/stars
-                for _ in range(10):
-                    spark_x = defender_pos[0] + random.randint(-30, 30)
-                    spark_y = defender_pos[1] + random.randint(-30, 30)
-                    pygame.draw.circle(self.screen, (255, 255, 0), (spark_x, spark_y), 3)
+            # Draw different effects based on action type and play sounds
+            if turn.is_miss:
+                # Miss effect
+                self._draw_miss_effect(defender_pos)
+                audio_manager.play_sound("miss")
+            elif turn.action_type == "magic":
+                # Enhanced magic attack effect
+                self._draw_magic_effect(defender_pos, turn.is_critical)
+                audio_manager.play_sound("magic", 1.2 if turn.is_critical else 1.0)
+            elif turn.is_critical:
+                # Critical hit effect
+                self._draw_critical_effect(attacker_pos, defender_pos)
+                audio_manager.play_sound("critical")
             else:
-                # Physical attack - draw line
-                pygame.draw.line(self.screen, (255, 0, 0), attacker_pos, defender_pos, 3)
+                # Normal attack effect
+                self._draw_normal_attack_effect(attacker_pos, defender_pos)
+                audio_manager.play_sound("attack")
             
-            # Draw damage numbers
+            # Draw floating damage text with animation
             if turn.damage > 0:
-                damage_color = (255, 0, 0) if turn.is_critical else (255, 100, 0)
-                damage_text = f"-{turn.damage}"
-                if turn.is_critical:
-                    damage_text += "!"
-                damage_surface = self.font.render(damage_text, True, damage_color)
-                self.screen.blit(damage_surface, (defender_pos[0] - 20, defender_pos[1] - 120))
+                self._draw_damage_text(turn, defender_pos)
                 
         except Exception as e:
             logger.error(f"Error drawing attack effect: {e}")
+    
+    def _draw_magic_effect(self, target_pos: Tuple[int, int], is_critical: bool):
+        """Draw magic attack effect"""
+        try:
+            # Magic circle effect
+            current_time = pygame.time.get_ticks()
+            radius = 30 + int(10 * math.sin(current_time * 0.01))
+            
+            # Outer ring
+            pygame.draw.circle(self.screen, (100, 100, 255), target_pos, radius, 3)
+            # Inner ring
+            pygame.draw.circle(self.screen, (200, 200, 255), target_pos, radius // 2, 2)
+            
+            # Sparkling particles
+            for i in range(8 if is_critical else 5):
+                angle = (current_time * 0.01 + i * (2 * math.pi / (8 if is_critical else 5))) % (2 * math.pi)
+                spark_x = target_pos[0] + int((radius + 10) * math.cos(angle))
+                spark_y = target_pos[1] + int((radius + 10) * math.sin(angle))
+                color = (255, 255, 150) if is_critical else (150, 150, 255)
+                pygame.draw.circle(self.screen, color, (spark_x, spark_y), 4)
+            
+        except Exception as e:
+            logger.error(f"Error drawing magic effect: {e}")
+    
+    def _draw_critical_effect(self, attacker_pos: Tuple[int, int], defender_pos: Tuple[int, int]):
+        """Draw critical hit effect"""
+        try:
+            # Lightning bolt effect
+            points = [attacker_pos]
+            segments = 4
+            for i in range(1, segments):
+                t = i / segments
+                x = int(attacker_pos[0] + t * (defender_pos[0] - attacker_pos[0]))
+                y = int(attacker_pos[1] + t * (defender_pos[1] - attacker_pos[1]))
+                # Add random jagged offset
+                x += random.randint(-15, 15)
+                y += random.randint(-15, 15)
+                points.append((x, y))
+            points.append(defender_pos)
+            
+            # Draw lightning bolt
+            if len(points) > 2:
+                pygame.draw.lines(self.screen, (255, 255, 100), False, points, 4)
+                pygame.draw.lines(self.screen, (255, 255, 255), False, points, 2)
+            
+            # Flash effect around defender
+            for radius in [40, 30, 20]:
+                alpha = max(10, 100 - (40 - radius) * 3)
+                flash_surface = pygame.Surface((radius * 2, radius * 2))
+                flash_surface.set_alpha(alpha)
+                flash_surface.fill((255, 255, 200))
+                self.screen.blit(flash_surface, (defender_pos[0] - radius, defender_pos[1] - radius))
+            
+        except Exception as e:
+            logger.error(f"Error drawing critical effect: {e}")
+    
+    def _draw_normal_attack_effect(self, attacker_pos: Tuple[int, int], defender_pos: Tuple[int, int]):
+        """Draw normal attack effect"""
+        try:
+            # Impact lines
+            pygame.draw.line(self.screen, (255, 100, 100), attacker_pos, defender_pos, 5)
+            pygame.draw.line(self.screen, (255, 200, 200), attacker_pos, defender_pos, 2)
+            
+            # Impact burst at defender position
+            for i in range(6):
+                angle = i * (2 * math.pi / 6)
+                end_x = defender_pos[0] + int(25 * math.cos(angle))
+                end_y = defender_pos[1] + int(25 * math.sin(angle))
+                pygame.draw.line(self.screen, (255, 150, 150), defender_pos, (end_x, end_y), 2)
+            
+        except Exception as e:
+            logger.error(f"Error drawing normal attack effect: {e}")
+    
+    def _draw_damage_text(self, turn: BattleTurn, position: Tuple[int, int]):
+        """Draw animated damage text"""
+        try:
+            # Determine text color and style
+            if turn.is_critical:
+                damage_color = (255, 255, 100)  # Yellow for critical
+                font_size = 32
+                damage_text = f"{turn.damage}!!"
+            else:
+                damage_color = (255, 100, 100)  # Red for normal
+                font_size = 24
+                damage_text = str(turn.damage)
+            
+            # Create font for damage text
+            try:
+                damage_font = pygame.font.Font(None, font_size)
+            except:
+                damage_font = self.font  # Fallback to existing font
+                
+            damage_surface = damage_font.render(damage_text, True, damage_color)
+            
+            # Add floating animation
+            float_offset = int(10 * math.sin(pygame.time.get_ticks() * 0.01))
+            text_pos = (position[0] - damage_surface.get_width() // 2, 
+                       position[1] - 140 - float_offset)
+            
+            # Draw text with outline for better visibility
+            try:
+                outline_surface = damage_font.render(damage_text, True, (0, 0, 0))
+                for dx in [-1, 0, 1]:
+                    for dy in [-1, 0, 1]:
+                        if dx != 0 or dy != 0:
+                            self.screen.blit(outline_surface, (text_pos[0] + dx, text_pos[1] + dy))
+            except:
+                pass  # Skip outline if it fails
+            
+            self.screen.blit(damage_surface, text_pos)
+            
+        except Exception as e:
+            logger.error(f"Error drawing damage text: {e}")
+    
+    def _draw_miss_effect(self, position: Tuple[int, int]):
+        """Draw miss effect"""
+        try:
+            miss_surface = self.font.render("MISS!", True, (200, 200, 200))
+            
+            # Floating animation
+            float_offset = int(8 * math.sin(pygame.time.get_ticks() * 0.008))
+            text_pos = (position[0] - miss_surface.get_width() // 2, 
+                       position[1] - 120 - float_offset)
+            
+            # Draw with outline
+            try:
+                outline_surface = self.font.render("MISS!", True, (100, 100, 100))
+                self.screen.blit(outline_surface, (text_pos[0] + 1, text_pos[1] + 1))
+            except:
+                pass
+                
+            self.screen.blit(miss_surface, text_pos)
+            
+        except Exception as e:
+            logger.error(f"Error drawing miss effect: {e}")
+    
+    def _start_battle_bgm(self):
+        """Start battle background music"""
+        try:
+            # Try to load and play battle BGM file
+            if audio_manager.load_bgm("battle.mp3") or audio_manager.load_bgm("battle.ogg") or audio_manager.load_bgm("battle.wav"):
+                audio_manager.play_bgm(loops=-1, fade_in=1000)
+                logger.debug("Started battle BGM from file")
+            else:
+                logger.debug("No battle BGM file found, continuing without background music")
+        except Exception as e:
+            logger.warning(f"Failed to start battle BGM: {e}")
+    
+    def _draw_character(self, character: Character, position: Tuple[int, int], current_hp: int):
+        """Draw character with image or fallback to colored rectangle"""
+        try:
+            max_width, max_height = 120, 120  # Maximum display size
+            
+            # Try to load and display character image
+            character_sprite = self._load_character_sprite(character)
+            
+            if character_sprite:
+                # Scale image while preserving aspect ratio
+                original_width, original_height = character_sprite.get_size()
+                scale_x = max_width / original_width
+                scale_y = max_height / original_height
+                scale = min(scale_x, scale_y)  # Use smaller scale to fit within bounds
+                
+                new_width = int(original_width * scale)
+                new_height = int(original_height * scale)
+                
+                scaled_sprite = pygame.transform.scale(character_sprite, (new_width, new_height))
+                
+                # Calculate position to center the image
+                char_x = position[0] - new_width // 2
+                char_y = position[1] - new_height // 2
+                
+                # Apply HP-based effects
+                hp_ratio = current_hp / character.hp
+                
+                # Add battle animation effect (slight bobbing)
+                bob_offset = int(2 * math.sin(pygame.time.get_ticks() * 0.003))
+                char_y += bob_offset
+                
+                if hp_ratio < 0.5:  # Apply red tint when HP is low
+                    # Create a red overlay with simpler blending
+                    red_overlay = pygame.Surface((new_width, new_height))
+                    alpha = int(60 * (1 - hp_ratio * 2))  # More red as HP decreases
+                    red_overlay.set_alpha(alpha)
+                    red_overlay.fill((255, 80, 80))  # Red damage indicator
+                    scaled_sprite.blit(red_overlay, (0, 0))
+                
+                # Draw the character image
+                self.screen.blit(scaled_sprite, (char_x, char_y))
+            else:
+                # Fallback to colored rectangle
+                char_width, char_height = 80, 120
+                char_x = position[0] - char_width // 2
+                char_y = position[1] - char_height // 2
+                char_rect = pygame.Rect(char_x, char_y, char_width, char_height)
+                hp_ratio = current_hp / character.hp
+                char_color = (255 * (1 - hp_ratio), 255 * hp_ratio, 0)
+                
+                pygame.draw.rect(self.screen, char_color, char_rect)
+                pygame.draw.rect(self.screen, (0, 0, 0), char_rect, 2)
+                
+        except Exception as e:
+            logger.error(f"Error drawing character {character.name}: {e}")
+            # Emergency fallback - draw simple rectangle
+            char_rect = pygame.Rect(position[0] - 40, position[1] - 60, 80, 120)
+            pygame.draw.rect(self.screen, (128, 128, 128), char_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), char_rect, 2)
+    
+    def _load_character_sprite(self, character: Character) -> Optional[pygame.Surface]:
+        """Load character sprite with caching"""
+        try:
+            # Check cache first
+            if character.id in self.battle_sprites:
+                return self.battle_sprites[character.id]
+            
+            # Check if display is initialized
+            if not pygame.get_init() or not self.screen:
+                logger.warning(f"Pygame display not initialized, cannot load sprite for {character.name}")
+                return None
+            
+            # Try to load sprite image (background removed) first, fallback to original image
+            image_path = character.sprite_path or character.image_path
+            if image_path:
+                # If it's a relative path, make it relative to the project root
+                if not Path(image_path).is_absolute():
+                    image_path = str(Path.cwd() / image_path)
+                
+                if Path(image_path).exists():
+                    try:
+                        sprite = pygame.image.load(image_path)
+                        # Convert for better performance (only after display is initialized)
+                        sprite = sprite.convert_alpha()
+                        # Cache the sprite
+                        self.battle_sprites[character.id] = sprite
+                        sprite_type = "sprite" if character.sprite_path else "original image"
+                        logger.debug(f"Loaded {sprite_type} for character {character.name} from {image_path}")
+                        return sprite
+                    except pygame.error as e:
+                        logger.warning(f"Failed to load image {image_path}: {e}")
+                else:
+                    logger.warning(f"Image file not found for character {character.name}: {image_path}")
+            else:
+                logger.warning(f"No sprite or image path specified for character {character.name}")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error loading character sprite: {e}")
+            return None
     
     def _show_battle_result(self, battle: Battle, char1: Character, char2: Character, char1_hp: int, char2_hp: int):
         """Show final battle result screen"""
@@ -529,74 +797,94 @@ class BattleEngine:
             return
             
         try:
-            # Process events to keep window responsive
-            should_quit = False
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    should_quit = True
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE or event.key == pygame.K_SPACE:
-                        should_quit = True
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    should_quit = True
+            # Clear any pending events first
+            pygame.event.clear()
             
-            # If user wants to close, return early
-            if should_quit:
-                return
             # Draw result overlay
             overlay = pygame.Surface((Settings.SCREEN_WIDTH, Settings.SCREEN_HEIGHT))
-            overlay.set_alpha(128)
+            overlay.set_alpha(200)
             overlay.fill((0, 0, 0))
             self.screen.blit(overlay, (0, 0))
             
             # Determine winner
             if battle.winner_id == char1.id:
                 winner_text = f"🏆 {char1.name} の勝利！"
+                winner_color = (255, 215, 0)  # Gold
             elif battle.winner_id == char2.id:
                 winner_text = f"🏆 {char2.name} の勝利！"
+                winner_color = (255, 215, 0)  # Gold
             else:
                 winner_text = "⚖️ 引き分け！"
+                winner_color = (192, 192, 192)  # Silver
             
             # Draw winner text
-            winner_surface = self.font.render(winner_text, True, (255, 255, 0))
-            text_rect = winner_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, Settings.SCREEN_HEIGHT // 2))
+            winner_surface = self.font.render(winner_text, True, winner_color)
+            text_rect = winner_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, Settings.SCREEN_HEIGHT // 2 - 100))
             self.screen.blit(winner_surface, text_rect)
             
             # Draw battle stats
             stats_text = [
                 f"バトル時間: {battle.duration:.2f}秒",
                 f"総ターン数: {len(battle.turns)}",
-                f"最終HP - {char1.name}: {char1_hp}, {char2.name}: {char2_hp}",
-                "",
-                "ESC / スペース / クリックで閉じる"
+                f"最終HP - {char1.name}: {char1_hp}, {char2.name}: {char2_hp}"
             ]
             
             for i, stat in enumerate(stats_text):
-                if stat:  # Skip empty lines
-                    color = (255, 255, 255) if i < 3 else (200, 200, 200)
-                    font = self.small_font if i < 3 else self.small_font
-                    stat_surface = font.render(stat, True, color)
-                    stat_rect = stat_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, Settings.SCREEN_HEIGHT // 2 + 50 + i * 25))
-                    self.screen.blit(stat_surface, stat_rect)
+                stat_surface = self.small_font.render(stat, True, (255, 255, 255))
+                stat_rect = stat_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, Settings.SCREEN_HEIGHT // 2 - 20 + i * 30))
+                self.screen.blit(stat_surface, stat_rect)
+            
+            # Draw OK button
+            button_width = 120
+            button_height = 40
+            button_x = Settings.SCREEN_WIDTH // 2 - button_width // 2
+            button_y = Settings.SCREEN_HEIGHT // 2 + 100
+            button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
+            
+            # Button background
+            pygame.draw.rect(self.screen, (70, 130, 180), button_rect)
+            pygame.draw.rect(self.screen, (255, 255, 255), button_rect, 2)
+            
+            # Button text
+            button_text = self.font.render("OK", True, (255, 255, 255))
+            button_text_rect = button_text.get_rect(center=button_rect.center)
+            self.screen.blit(button_text, button_text_rect)
+            
+            # Draw instruction text
+            instruction_text = "ESC / スペース / OKボタンで閉じる"
+            instruction_surface = self.small_font.render(instruction_text, True, (200, 200, 200))
+            instruction_rect = instruction_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, button_y + 60))
+            self.screen.blit(instruction_surface, instruction_rect)
             
             pygame.display.flip()
             
-            # Wait for user input instead of fixed time
+            # Wait for user input
             waiting = True
             clock = pygame.time.Clock()
             while waiting:
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         waiting = False
+                        self._force_close_window()
                     elif event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_ESCAPE or event.key == pygame.K_SPACE:
                             waiting = False
                     elif event.type == pygame.MOUSEBUTTONDOWN:
-                        waiting = False
+                        mouse_pos = pygame.mouse.get_pos()
+                        if button_rect.collidepoint(mouse_pos):
+                            # OK button clicked
+                            waiting = False
+                        else:
+                            # Clicked anywhere else - also close
+                            waiting = False
+                            
                 clock.tick(30)  # Limit to 30 FPS while waiting
             
         except Exception as e:
             logger.error(f"Error showing battle result: {e}")
+        finally:
+            # Ensure window gets closed
+            self._close_battle_window()
     
     def get_battle_result(self, battle: Battle, char1: Character, char2: Character) -> BattleResult:
         """Generate comprehensive battle result summary"""
@@ -649,18 +937,49 @@ class BattleEngine:
             # Reset battle state
             self.current_battle = None
             
-            # Clear the screen to prepare for next battle
-            if self.screen:
-                self.screen.fill((0, 0, 0))
-                pygame.display.flip()
+            # Clear sprite cache to free memory
+            self.battle_sprites.clear()
+            
+            # Close the battle window properly
+            self._close_battle_window()
                 
             logger.debug("Battle state cleaned up")
         except Exception as e:
             logger.error(f"Error during battle cleanup: {e}")
     
+    def _close_battle_window(self):
+        """Close the battle window properly"""
+        try:
+            if self.screen:
+                # Fill screen with black and update to visually indicate closure
+                self.screen.fill((0, 0, 0))
+                pygame.display.flip()
+                
+                # Close the display
+                pygame.display.quit()
+                self.screen = None
+                
+            logger.debug("Battle window closed")
+        except Exception as e:
+            logger.error(f"Error closing battle window: {e}")
+    
+    def _force_close_window(self):
+        """Force close the battle window immediately"""
+        try:
+            if pygame.get_init():
+                pygame.display.quit()
+                self.screen = None
+            logger.debug("Battle window force closed")
+        except Exception as e:
+            logger.error(f"Error force closing window: {e}")
+    
     def cleanup(self):
         """Clean up pygame resources"""
         try:
+            # Stop any playing audio
+            audio_manager.stop_bgm()
+            audio_manager.cleanup()
+            
             if pygame.get_init():
                 pygame.quit()
                 self.pygame_initialized = False

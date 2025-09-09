@@ -26,6 +26,8 @@ class Settings:
     CHARACTERS_DIR = DATA_DIR / "characters"
     SPRITES_DIR = DATA_DIR / "sprites"
     ASSETS_DIR = PROJECT_ROOT / "assets"
+    SOUNDS_DIR = ASSETS_DIR / "sounds"
+    MUSIC_DIR = ASSETS_DIR / "music"
     
     # Database
     DATABASE_PATH = DATA_DIR / "database.db"
@@ -35,10 +37,17 @@ class Settings:
     SCREEN_HEIGHT = 768
     FPS = 60
     
+    # Audio Settings
+    ENABLE_SOUND = True
+    MASTER_VOLUME = 0.7
+    BGM_VOLUME = 0.5
+    SFX_VOLUME = 0.8
+    
     @classmethod
     def ensure_directories(cls):
         """Create necessary directories if they don't exist"""
-        for directory in [cls.DATA_DIR, cls.CHARACTERS_DIR, cls.SPRITES_DIR]:
+        for directory in [cls.DATA_DIR, cls.CHARACTERS_DIR, cls.SPRITES_DIR, 
+                         cls.ASSETS_DIR, cls.SOUNDS_DIR, cls.MUSIC_DIR]:
             directory.mkdir(parents=True, exist_ok=True)
 
 # Initialize directories on import

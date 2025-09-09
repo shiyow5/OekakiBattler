@@ -1,0 +1,16 @@
+{
+  "battle_speed": 1.51,
+  "max_turns": 50,
+  "critical_chance": 0.05,
+  "screen_width": 1024,
+  "screen_height": 768,
+  "fps": 60,
+  "master_volume": 0.7,
+  "bgm_volume": 0.5,
+  "sfx_volume": 0.8,
+  "enable_sound": true,
+  "auto_save_battles": true,
+  "show_battle_animations": true,
+  "japanese_ui": true,
+  "auto_load_characters": true
+}
