@@ -1,0 +1,673 @@
+"""
+Battle engine service for automated character battles
+"""
+
+import random
+import time
+import logging
+import pygame
+import math
+from pathlib import Path
+from typing import Tuple, List, Optional
+from src.models import Character, Battle, BattleTurn, BattleResult
+from config.settings import Settings
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class BattleEngine:
+    """Handle automated battles between characters"""
+    
+    def __init__(self):
+        self.max_turns = Settings.MAX_TURNS
+        self.critical_chance = Settings.CRITICAL_CHANCE
+        self.critical_multiplier = Settings.CRITICAL_MULTIPLIER
+        
+        # Battle state
+        self.current_battle = None
+        self.battle_speed = 2.0  # Battle animation speed multiplier (higher = faster)
+        
+        # Pygame state - initialize only when needed
+        self.pygame_initialized = False
+        self.screen = None
+        self.clock = None
+        self.font = None
+        self.small_font = None
+        self.battle_sprites = {}
+        
+    def initialize_display(self) -> bool:
+        """Initialize Pygame display for battle visualization"""
+        try:
+            # Initialize Pygame if not already done
+            if not self.pygame_initialized:
+                pygame.init()
+                self.pygame_initialized = True
+                logger.info("Pygame initialized")
+            
+            # Initialize or reinitialize the display
+            if self.screen is None:
+                self.screen = pygame.display.set_mode((Settings.SCREEN_WIDTH, Settings.SCREEN_HEIGHT))
+                logger.info("Display created")
+            
+            pygame.display.set_caption("お絵描きバトラー - Battle Arena")
+            
+            # Initialize clock if needed
+            if self.clock is None:
+                self.clock = pygame.time.Clock()
+            
+            # Load fonts with Japanese support
+            if self.font is None:
+                try:
+                    # Try to load a Japanese font
+                    japanese_fonts = [
+                        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",  # Linux system font
+                        "/usr/share/fonts/truetype/fonts-japanese-mincho.ttf",  # Linux system font
+                        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",  # macOS
+                        "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",  # Linux
+                        "C:/Windows/Fonts/msgothic.ttc",  # Windows
+                        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Linux fallback
+                    ]
+                    
+                    font_loaded = False
+                    for font_path in japanese_fonts:
+                        try:
+                            if Path(font_path).exists():
+                                self.font = pygame.font.Font(font_path, 28)
+                                font_loaded = True
+                                logger.info(f"Loaded Japanese font: {font_path}")
+                                break
+                        except:
+                            continue
+                    
+                    if not font_loaded:
+                        # Fallback to default font
+                        self.font = pygame.font.Font(None, 36)
+                        logger.warning("Could not load Japanese font, using default")
+                        
+                except Exception as e:
+                    logger.error(f"Error loading font: {e}")
+                    self.font = pygame.font.Font(None, 36)
+            
+            if self.small_font is None:
+                try:
+                    # Same logic for small font
+                    japanese_fonts = [
+                        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+                        "/usr/share/fonts/truetype/fonts-japanese-mincho.ttf",
+                        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+                        "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",
+                        "C:/Windows/Fonts/msgothic.ttc",
+                        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                    ]
+                    
+                    font_loaded = False
+                    for font_path in japanese_fonts:
+                        try:
+                            if Path(font_path).exists():
+                                self.small_font = pygame.font.Font(font_path, 18)
+                                font_loaded = True
+                                break
+                        except:
+                            continue
+                    
+                    if not font_loaded:
+                        self.small_font = pygame.font.Font(None, 24)
+                        
+                except Exception as e:
+                    logger.error(f"Error loading small font: {e}")
+                    self.small_font = pygame.font.Font(None, 24)
+            
+            logger.info("Battle display initialized successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize battle display: {e}")
+            return False
+    
+    def start_battle(self, char1: Character, char2: Character, visual_mode: bool = True) -> Battle:
+        """Start a battle between two characters"""
+        try:
+            logger.info(f"Starting battle: {char1.name} vs {char2.name}")
+            
+            # Create new battle
+            battle = Battle(
+                character1_id=char1.id,
+                character2_id=char2.id
+            )
+            self.current_battle = battle
+            
+            # Initialize character HP for battle
+            char1_current_hp = char1.hp
+            char2_current_hp = char2.hp
+            
+            # Add battle start log
+            battle.add_log_entry(f"🥊 バトル開始！ {char1.name} VS {char2.name}")
+            battle.add_log_entry(f"💚 {char1.name} HP: {char1_current_hp} / {char2.name} HP: {char2_current_hp}")
+            
+            # Initialize display if visual mode
+            if visual_mode:
+                if not self.initialize_display():
+                    visual_mode = False
+            
+            # Battle loop
+            start_time = time.time()
+            turn_number = 1
+            
+            while turn_number <= self.max_turns:
+                # Check if battle should end
+                if char1_current_hp <= 0 or char2_current_hp <= 0:
+                    break
+                
+                # Determine turn order
+                turn_order = self.determine_turn_order(char1, char2)
+                
+                for attacker, defender in turn_order:
+                    if attacker.id == char1.id:
+                        attacker_hp, defender_hp = char1_current_hp, char2_current_hp
+                    else:
+                        attacker_hp, defender_hp = char2_current_hp, char1_current_hp
+                    
+                    # Skip turn if attacker is defeated
+                    if attacker_hp <= 0:
+                        continue
+                    
+                    # Execute turn
+                    turn = self.execute_turn(attacker, defender, turn_number, attacker_hp, defender_hp)
+                    battle.add_turn(turn)
+                    
+                    # Update HP
+                    if attacker.id == char1.id:
+                        char2_current_hp = turn.defender_hp_after
+                    else:
+                        char1_current_hp = turn.defender_hp_after
+                    
+                    # Add log entry
+                    log_message = self._create_turn_log(attacker, defender, turn)
+                    battle.add_log_entry(log_message)
+                    
+                    # Visual update
+                    if visual_mode and self.screen:
+                        self._update_battle_display(char1, char2, char1_current_hp, char2_current_hp, turn, battle.battle_log[-5:])
+                        time.sleep(1.0 / self.battle_speed)
+                    
+                    # Check if battle should end
+                    if char1_current_hp <= 0 or char2_current_hp <= 0:
+                        break
+                
+                turn_number += 1
+            
+            # Determine winner
+            if char1_current_hp > char2_current_hp:
+                battle.winner_id = char1.id
+                winner_name = char1.name
+            elif char2_current_hp > char1_current_hp:
+                battle.winner_id = char2.id
+                winner_name = char2.name
+            else:
+                battle.winner_id = None
+                winner_name = "Draw"
+            
+            # Calculate battle duration
+            battle.duration = time.time() - start_time
+            
+            # Add final log
+            if battle.winner_id:
+                battle.add_log_entry(f"🎉 バトル終了！勝者: {winner_name}")
+            else:
+                battle.add_log_entry("⚖️ バトル終了！引き分け！")
+            
+            battle.add_log_entry(f"⏱️ バトル時間: {battle.duration:.2f}秒")
+            battle.add_log_entry(f"🔄 総ターン数: {len(battle.turns)}")
+            
+            logger.info(f"Battle completed: Winner - {winner_name}")
+            
+            # Final display update
+            if visual_mode and self.screen:
+                self._show_battle_result(battle, char1, char2, char1_current_hp, char2_current_hp)
+            
+            # Clean up battle state
+            self._cleanup_battle()
+            
+            return battle
+            
+        except Exception as e:
+            logger.error(f"Error in battle execution: {e}")
+            # Clean up on error
+            self._cleanup_battle()
+            
+            if self.current_battle:
+                self.current_battle.add_log_entry(f"Battle error: {e}")
+                return self.current_battle
+            else:
+                # Return error battle
+                error_battle = Battle(character1_id=char1.id, character2_id=char2.id)
+                error_battle.add_log_entry(f"Battle failed: {e}")
+                return error_battle
+    
+    def calculate_damage(self, attacker: Character, defender: Character, action_type: str = "attack") -> Tuple[int, bool, bool]:
+        """Calculate damage, critical hit, and miss status"""
+        try:
+            is_critical = False
+            is_miss = False
+            base_damage = 0
+            
+            # Calculate hit chance based on speed difference
+            speed_diff = attacker.speed - defender.speed
+            hit_chance = max(0.8, min(0.95, 0.85 + speed_diff * 0.001))
+            
+            # Check for miss
+            if random.random() > hit_chance:
+                is_miss = True
+                return 0, is_critical, is_miss
+            
+            # Calculate base damage
+            if action_type == "magic":
+                base_damage = attacker.magic + random.randint(-10, 10)
+                # Magic ignores some defense
+                effective_defense = max(0, defender.defense * 0.5)
+            else:  # Physical attack
+                base_damage = attacker.attack + random.randint(-15, 15)
+                effective_defense = defender.defense
+            
+            # Apply defense
+            damage = max(1, base_damage - effective_defense + random.randint(-5, 5))
+            
+            # Check for critical hit
+            critical_chance = self.critical_chance
+            if action_type == "magic":
+                critical_chance *= 0.7  # Magic has lower critical chance
+            
+            if random.random() < critical_chance:
+                is_critical = True
+                damage = int(damage * self.critical_multiplier)
+            
+            return damage, is_critical, is_miss
+            
+        except Exception as e:
+            logger.error(f"Error calculating damage: {e}")
+            return 10, False, False  # Fallback damage
+    
+    def determine_turn_order(self, char1: Character, char2: Character) -> List[Tuple[Character, Character]]:
+        """Determine who goes first based on speed"""
+        try:
+            # Add some randomness to speed to prevent predictable patterns
+            char1_speed = char1.speed + random.randint(-5, 5)
+            char2_speed = char2.speed + random.randint(-5, 5)
+            
+            if char1_speed >= char2_speed:
+                return [(char1, char2), (char2, char1)]
+            else:
+                return [(char2, char1), (char1, char2)]
+                
+        except Exception as e:
+            logger.error(f"Error determining turn order: {e}")
+            return [(char1, char2), (char2, char1)]  # Default order
+    
+    def execute_turn(self, attacker: Character, defender: Character, turn_number: int, attacker_hp: int, defender_hp: int) -> BattleTurn:
+        """Execute a single battle turn"""
+        try:
+            # Determine action type based on character stats and situation
+            action_type = self._choose_action(attacker, defender, defender_hp)
+            
+            # Calculate damage
+            damage, is_critical, is_miss = self.calculate_damage(attacker, defender, action_type)
+            
+            # Apply damage
+            defender_hp_after = max(0, defender_hp - damage)
+            
+            # Create turn record
+            turn = BattleTurn(
+                turn_number=turn_number,
+                attacker_id=attacker.id,
+                defender_id=defender.id,
+                action_type=action_type,
+                damage=damage,
+                is_critical=is_critical,
+                is_miss=is_miss,
+                attacker_hp_after=attacker_hp,
+                defender_hp_after=defender_hp_after
+            )
+            
+            return turn
+            
+        except Exception as e:
+            logger.error(f"Error executing turn: {e}")
+            # Return safe default turn
+            return BattleTurn(
+                turn_number=turn_number,
+                attacker_id=attacker.id,
+                defender_id=defender.id,
+                action_type="attack",
+                damage=0,
+                is_critical=False,
+                is_miss=True,
+                attacker_hp_after=attacker_hp,
+                defender_hp_after=defender_hp
+            )
+    
+    def _choose_action(self, attacker: Character, defender: Character, defender_hp: int) -> str:
+        """Choose action type based on character stats and battle situation"""
+        try:
+            # Calculate probabilities based on stats
+            magic_prob = min(0.4, attacker.magic / 200)  # Higher magic = more likely to use magic
+            
+            # Increase magic usage if defender has high defense
+            if defender.defense > 70:
+                magic_prob += 0.2
+            
+            # Increase magic usage if defender is low on HP (finishing move)
+            if defender_hp < defender.hp * 0.3:
+                magic_prob += 0.15
+            
+            # Choose action
+            if random.random() < magic_prob:
+                return "magic"
+            else:
+                return "attack"
+                
+        except Exception as e:
+            logger.error(f"Error choosing action: {e}")
+            return "attack"
+    
+    def _create_turn_log(self, attacker: Character, defender: Character, turn: BattleTurn) -> str:
+        """Create descriptive log message for a turn"""
+        try:
+            if turn.is_miss:
+                return f"💨 {attacker.name}の攻撃は外れた！"
+            
+            if turn.action_type == "magic":
+                if turn.is_critical:
+                    return f"✨💥 {attacker.name}のクリティカル魔法攻撃！{defender.name}に{turn.damage}ダメージ！"
+                else:
+                    return f"🔮 {attacker.name}の魔法攻撃！{defender.name}に{turn.damage}ダメージ"
+            else:
+                if turn.is_critical:
+                    return f"⚔️💥 {attacker.name}のクリティカル攻撃！{defender.name}に{turn.damage}ダメージ！"
+                else:
+                    return f"⚔️ {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ"
+                
+        except Exception as e:
+            logger.error(f"Error creating turn log: {e}")
+            return f"{attacker.name} attacks {defender.name}"
+    
+    def _update_battle_display(self, char1: Character, char2: Character, char1_hp: int, char2_hp: int, current_turn: BattleTurn, recent_logs: List[str]):
+        """Update the battle visualization"""
+        if not self.screen:
+            return
+            
+        try:
+            # Process pygame events to keep window responsive
+            should_quit = False
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    should_quit = True
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        should_quit = True
+            
+            # If user wants to quit, return early to end battle
+            if should_quit:
+                return
+            # Clear screen
+            self.screen.fill((240, 248, 255))  # Light blue background
+            
+            # Draw battle arena
+            arena_rect = pygame.Rect(50, 100, Settings.SCREEN_WIDTH - 100, 400)
+            pygame.draw.rect(self.screen, (200, 220, 200), arena_rect)
+            pygame.draw.rect(self.screen, (100, 100, 100), arena_rect, 3)
+            
+            # Character positions
+            char1_pos = (200, 300)
+            char2_pos = (Settings.SCREEN_WIDTH - 200, 300)
+            
+            # Draw characters (placeholder rectangles for now)
+            char1_rect = pygame.Rect(char1_pos[0] - 40, char1_pos[1] - 60, 80, 120)
+            char2_rect = pygame.Rect(char2_pos[0] - 40, char2_pos[1] - 60, 80, 120)
+            
+            # Color based on HP percentage
+            char1_hp_ratio = char1_hp / char1.hp
+            char2_hp_ratio = char2_hp / char2.hp
+            
+            char1_color = (255 * (1 - char1_hp_ratio), 255 * char1_hp_ratio, 0)
+            char2_color = (255 * (1 - char2_hp_ratio), 255 * char2_hp_ratio, 0)
+            
+            pygame.draw.rect(self.screen, char1_color, char1_rect)
+            pygame.draw.rect(self.screen, char2_color, char2_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), char1_rect, 2)
+            pygame.draw.rect(self.screen, (0, 0, 0), char2_rect, 2)
+            
+            # Draw character names
+            name1_surface = self.font.render(char1.name, True, (0, 0, 0))
+            name2_surface = self.font.render(char2.name, True, (0, 0, 0))
+            self.screen.blit(name1_surface, (char1_pos[0] - 40, char1_pos[1] + 70))
+            self.screen.blit(name2_surface, (char2_pos[0] - 40, char2_pos[1] + 70))
+            
+            # Draw HP bars
+            hp_bar_width = 100
+            hp_bar_height = 20
+            
+            # Character 1 HP bar
+            hp1_bar_rect = pygame.Rect(char1_pos[0] - 50, char1_pos[1] - 80, hp_bar_width, hp_bar_height)
+            hp1_fill_width = int(hp_bar_width * char1_hp_ratio)
+            hp1_fill_rect = pygame.Rect(char1_pos[0] - 50, char1_pos[1] - 80, hp1_fill_width, hp_bar_height)
+            
+            pygame.draw.rect(self.screen, (255, 255, 255), hp1_bar_rect)
+            pygame.draw.rect(self.screen, (0, 255, 0), hp1_fill_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, 2)
+            
+            # Character 2 HP bar
+            hp2_bar_rect = pygame.Rect(char2_pos[0] - 50, char2_pos[1] - 80, hp_bar_width, hp_bar_height)
+            hp2_fill_width = int(hp_bar_width * char2_hp_ratio)
+            hp2_fill_rect = pygame.Rect(char2_pos[0] - 50, char2_pos[1] - 80, hp2_fill_width, hp_bar_height)
+            
+            pygame.draw.rect(self.screen, (255, 255, 255), hp2_bar_rect)
+            pygame.draw.rect(self.screen, (0, 255, 0), hp2_fill_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, 2)
+            
+            # Draw HP text
+            hp1_text = f"HP: {char1_hp}/{char1.hp}"
+            hp2_text = f"HP: {char2_hp}/{char2.hp}"
+            hp1_surface = self.small_font.render(hp1_text, True, (0, 0, 0))
+            hp2_surface = self.small_font.render(hp2_text, True, (0, 0, 0))
+            self.screen.blit(hp1_surface, (char1_pos[0] - 50, char1_pos[1] - 100))
+            self.screen.blit(hp2_surface, (char2_pos[0] - 50, char2_pos[1] - 100))
+            
+            # Draw recent battle log
+            log_start_y = 520
+            for i, log_entry in enumerate(recent_logs):
+                log_surface = self.small_font.render(log_entry, True, (0, 0, 0))
+                self.screen.blit(log_surface, (50, log_start_y + i * 25))
+            
+            # Draw attack effect
+            if current_turn and not current_turn.is_miss:
+                self._draw_attack_effect(current_turn, char1_pos, char2_pos, char1, char2)
+            
+            # Update display
+            pygame.display.flip()
+            
+            # Control frame rate
+            if self.clock:
+                self.clock.tick(Settings.FPS)
+            
+        except Exception as e:
+            logger.error(f"Error updating battle display: {e}")
+    
+    def _draw_attack_effect(self, turn: BattleTurn, char1_pos: Tuple[int, int], char2_pos: Tuple[int, int], char1: Character, char2: Character):
+        """Draw visual attack effects"""
+        try:
+            # Determine positions
+            if turn.attacker_id == char1.id:
+                attacker_pos, defender_pos = char1_pos, char2_pos
+            else:
+                attacker_pos, defender_pos = char2_pos, char1_pos
+            
+            # Draw attack line/effect
+            if turn.action_type == "magic":
+                # Magic attack - draw sparkles/stars
+                for _ in range(10):
+                    spark_x = defender_pos[0] + random.randint(-30, 30)
+                    spark_y = defender_pos[1] + random.randint(-30, 30)
+                    pygame.draw.circle(self.screen, (255, 255, 0), (spark_x, spark_y), 3)
+            else:
+                # Physical attack - draw line
+                pygame.draw.line(self.screen, (255, 0, 0), attacker_pos, defender_pos, 3)
+            
+            # Draw damage numbers
+            if turn.damage > 0:
+                damage_color = (255, 0, 0) if turn.is_critical else (255, 100, 0)
+                damage_text = f"-{turn.damage}"
+                if turn.is_critical:
+                    damage_text += "!"
+                damage_surface = self.font.render(damage_text, True, damage_color)
+                self.screen.blit(damage_surface, (defender_pos[0] - 20, defender_pos[1] - 120))
+                
+        except Exception as e:
+            logger.error(f"Error drawing attack effect: {e}")
+    
+    def _show_battle_result(self, battle: Battle, char1: Character, char2: Character, char1_hp: int, char2_hp: int):
+        """Show final battle result screen"""
+        if not self.screen:
+            return
+            
+        try:
+            # Process events to keep window responsive
+            should_quit = False
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    should_quit = True
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE or event.key == pygame.K_SPACE:
+                        should_quit = True
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    should_quit = True
+            
+            # If user wants to close, return early
+            if should_quit:
+                return
+            # Draw result overlay
+            overlay = pygame.Surface((Settings.SCREEN_WIDTH, Settings.SCREEN_HEIGHT))
+            overlay.set_alpha(128)
+            overlay.fill((0, 0, 0))
+            self.screen.blit(overlay, (0, 0))
+            
+            # Determine winner
+            if battle.winner_id == char1.id:
+                winner_text = f"🏆 {char1.name} の勝利！"
+            elif battle.winner_id == char2.id:
+                winner_text = f"🏆 {char2.name} の勝利！"
+            else:
+                winner_text = "⚖️ 引き分け！"
+            
+            # Draw winner text
+            winner_surface = self.font.render(winner_text, True, (255, 255, 0))
+            text_rect = winner_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, Settings.SCREEN_HEIGHT // 2))
+            self.screen.blit(winner_surface, text_rect)
+            
+            # Draw battle stats
+            stats_text = [
+                f"バトル時間: {battle.duration:.2f}秒",
+                f"総ターン数: {len(battle.turns)}",
+                f"最終HP - {char1.name}: {char1_hp}, {char2.name}: {char2_hp}",
+                "",
+                "ESC / スペース / クリックで閉じる"
+            ]
+            
+            for i, stat in enumerate(stats_text):
+                if stat:  # Skip empty lines
+                    color = (255, 255, 255) if i < 3 else (200, 200, 200)
+                    font = self.small_font if i < 3 else self.small_font
+                    stat_surface = font.render(stat, True, color)
+                    stat_rect = stat_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, Settings.SCREEN_HEIGHT // 2 + 50 + i * 25))
+                    self.screen.blit(stat_surface, stat_rect)
+            
+            pygame.display.flip()
+            
+            # Wait for user input instead of fixed time
+            waiting = True
+            clock = pygame.time.Clock()
+            while waiting:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        waiting = False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE or event.key == pygame.K_SPACE:
+                            waiting = False
+                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                        waiting = False
+                clock.tick(30)  # Limit to 30 FPS while waiting
+            
+        except Exception as e:
+            logger.error(f"Error showing battle result: {e}")
+    
+    def get_battle_result(self, battle: Battle, char1: Character, char2: Character) -> BattleResult:
+        """Generate comprehensive battle result summary"""
+        try:
+            result = BattleResult(
+                winner=battle.winner_id,
+                total_turns=len(battle.turns),
+                duration=battle.duration
+            )
+            
+            # Calculate statistics
+            char1_damage = 0
+            char2_damage = 0
+            char1_criticals = 0
+            char2_criticals = 0
+            char1_magic = 0
+            char2_magic = 0
+            
+            for turn in battle.turns:
+                if turn.attacker_id == char1.id:
+                    char1_damage += turn.damage
+                    if turn.is_critical:
+                        char1_criticals += 1
+                    if turn.action_type == "magic":
+                        char1_magic += 1
+                else:
+                    char2_damage += turn.damage
+                    if turn.is_critical:
+                        char2_criticals += 1
+                    if turn.action_type == "magic":
+                        char2_magic += 1
+            
+            result.damage_dealt = {char1.id: char1_damage, char2.id: char2_damage}
+            result.critical_hits = {char1.id: char1_criticals, char2.id: char2_criticals}
+            result.magic_used = {char1.id: char1_magic, char2.id: char2_magic}
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error generating battle result: {e}")
+            return BattleResult(
+                winner=battle.winner_id,
+                total_turns=len(battle.turns),
+                duration=battle.duration
+            )
+    
+    def _cleanup_battle(self):
+        """Clean up battle state after each battle"""
+        try:
+            # Reset battle state
+            self.current_battle = None
+            
+            # Clear the screen to prepare for next battle
+            if self.screen:
+                self.screen.fill((0, 0, 0))
+                pygame.display.flip()
+                
+            logger.debug("Battle state cleaned up")
+        except Exception as e:
+            logger.error(f"Error during battle cleanup: {e}")
+    
+    def cleanup(self):
+        """Clean up pygame resources"""
+        try:
+            if pygame.get_init():
+                pygame.quit()
+                self.pygame_initialized = False
+                self.screen = None
+                self.clock = None
+                self.font = None
+                self.small_font = None
+            logger.info("Battle engine cleaned up")
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
