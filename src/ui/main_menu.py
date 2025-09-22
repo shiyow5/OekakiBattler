@@ -646,8 +646,8 @@ class MainMenuWindow:
     def _show_battle_history(self):
         """Show battle history window"""
         try:
-            battles = self.db_manager.get_recent_battles(20)
-            BattleHistoryWindow(self.root, battles, self.db_manager)
+            # Create battle history window with safer initialization
+            BattleHistoryWindow(self.root, self.db_manager)
         except Exception as e:
             logger.error(f"Error showing battle history: {e}")
             messagebox.showerror("Error", f"Failed to load battle history: {e}")
@@ -1067,21 +1067,433 @@ class StatsWindow:
             ttk.Label(battle_frame, text="バトル履歴がありません").pack(pady=20)
 
 class BattleHistoryWindow:
-    def __init__(self, parent, battles, db_manager):
-        self.battles = battles
+    def __init__(self, parent, db_manager):
         self.db_manager = db_manager
-        self.window = tk.Toplevel(parent)
-        self.window.title("📜 バトル履歴")
-        self.window.geometry("800x600")
-        self.window.resizable(True, True)
-        
-        # Center the window
-        self.window.transient(parent)
-        self.window.grab_set()
-        
-        self._create_widgets()
-        self._load_battle_history()
-    
+        self.battles = []
+        self.selected_battle = None
+
+        logger.info("Creating BattleHistoryWindow")
+
+        try:
+            # Create window with improved configuration
+            self.window = tk.Toplevel(parent)
+            self.window.title("🏟️ バトル履歴")
+            self.window.geometry("800x650")  # Better size for improved UI
+            self.window.resizable(True, True)
+
+            # Center the window
+            self.window.transient(parent)
+            self.window.grab_set()
+
+            # Configure cleanup protocol
+            self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+
+            # Create simple interface to avoid segfault
+            self._create_simple_interface()
+
+        except Exception as e:
+            logger.error(f"Critical error creating BattleHistoryWindow: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                import tkinter.messagebox as messagebox
+                messagebox.showerror("Error", f"Failed to create battle history window: {e}")
+            except:
+                pass
+            self._safe_close()
+
+    def _create_simple_interface(self):
+        """Create an improved, safe interface with better design"""
+        try:
+            logger.info("Creating improved battle history interface")
+
+            # Main container with better styling
+            main_frame = ttk.Frame(self.window, padding="15")
+            main_frame.pack(fill=tk.BOTH, expand=True)
+
+            # Title with emoji
+            title_label = ttk.Label(main_frame, text="🏟️ Battle History", font=("Arial", 16, "bold"))
+            title_label.pack(pady=(0, 15))
+
+            # Control frame with better layout
+            control_frame = ttk.Frame(main_frame)
+            control_frame.pack(fill=tk.X, pady=(0, 15))
+
+            # Left controls
+            left_controls = ttk.Frame(control_frame)
+            left_controls.pack(side=tk.LEFT)
+
+            ttk.Button(left_controls, text="🔄 Refresh", command=self._load_battles_safe).pack(side=tk.LEFT)
+
+            # Right controls
+            right_controls = ttk.Frame(control_frame)
+            right_controls.pack(side=tk.RIGHT)
+
+            ttk.Label(right_controls, text="Show battles:").pack(side=tk.LEFT, padx=(0, 5))
+            self.limit_var = tk.StringVar(value="15")
+            limit_combo = ttk.Combobox(right_controls, textvariable=self.limit_var,
+                                     values=["5", "10", "15", "20"], width=8, state="readonly")
+            limit_combo.pack(side=tk.LEFT)
+            limit_combo.bind("<<ComboboxSelected>>", self._on_limit_change)
+
+            # Create improved Treeview with safer configuration
+            list_frame = ttk.Frame(main_frame)
+            list_frame.pack(fill=tk.BOTH, expand=True)
+
+            # Try to create Treeview safely with fallback
+            try:
+                self._create_safe_treeview(list_frame)
+                self._use_treeview = True
+            except Exception as tree_e:
+                logger.warning(f"Treeview creation failed, using listbox: {tree_e}")
+                self._create_fallback_listbox(list_frame)
+                self._use_treeview = False
+
+            # Improved detail area
+            detail_frame = ttk.LabelFrame(main_frame, text="📋 Battle Details", padding="10")
+            detail_frame.pack(fill=tk.X, pady=(15, 0))
+
+            # Detail text with better formatting
+            detail_container = ttk.Frame(detail_frame)
+            detail_container.pack(fill=tk.BOTH, expand=True)
+
+            self.detail_text = tk.Text(detail_container, height=8, wrap=tk.WORD, state=tk.DISABLED,
+                                     font=("Consolas", 9), bg="#f8f9fa", relief="sunken", bd=1)
+            detail_scroll = ttk.Scrollbar(detail_container, orient=tk.VERTICAL, command=self.detail_text.yview)
+            self.detail_text.configure(yscrollcommand=detail_scroll.set)
+
+            self.detail_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            detail_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+            # Button frame with better styling
+            button_frame = ttk.Frame(main_frame)
+            button_frame.pack(fill=tk.X, pady=(15, 0))
+
+            # Center the close button
+            ttk.Button(button_frame, text="✖ Close", command=self._on_close).pack()
+
+            # Load initial data
+            self._load_battles_safe()
+
+            logger.info("Improved battle history interface created successfully")
+
+        except Exception as e:
+            logger.error(f"Error creating improved interface: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def _create_safe_treeview(self, parent):
+        """Create a safe Treeview with minimal configuration"""
+        # Create container for treeview and scrollbars
+        tree_container = ttk.Frame(parent)
+        tree_container.pack(fill=tk.BOTH, expand=True)
+
+        # Create Treeview with minimal columns to avoid segfault
+        self.battle_tree = ttk.Treeview(tree_container, height=12)
+
+        # Define columns step by step
+        self.battle_tree["columns"] = ("date", "fighters", "winner", "duration")
+        self.battle_tree["show"] = "tree headings"
+
+        # Configure column widths and headings safely
+        self.battle_tree.column("#0", width=80, minwidth=60, anchor="w")
+        self.battle_tree.column("date", width=100, minwidth=80, anchor="w")
+        self.battle_tree.column("fighters", width=250, minwidth=200, anchor="w")
+        self.battle_tree.column("winner", width=120, minwidth=100, anchor="w")
+        self.battle_tree.column("duration", width=80, minwidth=60, anchor="e")
+
+        self.battle_tree.heading("#0", text="ID", anchor="w")
+        self.battle_tree.heading("date", text="Date", anchor="w")
+        self.battle_tree.heading("fighters", text="Battle", anchor="w")
+        self.battle_tree.heading("winner", text="Winner", anchor="w")
+        self.battle_tree.heading("duration", text="Time(s)", anchor="e")
+
+        # Add scrollbars
+        v_scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=self.battle_tree.yview)
+        h_scrollbar = ttk.Scrollbar(tree_container, orient=tk.HORIZONTAL, command=self.battle_tree.xview)
+
+        self.battle_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+
+        # Pack everything
+        self.battle_tree.grid(row=0, column=0, sticky="nsew")
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+
+        tree_container.grid_rowconfigure(0, weight=1)
+        tree_container.grid_columnconfigure(0, weight=1)
+
+        # Bind selection event
+        self.battle_tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+
+        logger.info("Safe Treeview created successfully")
+
+    def _create_fallback_listbox(self, parent):
+        """Create fallback listbox if Treeview fails"""
+        list_container = ttk.Frame(parent)
+        list_container.pack(fill=tk.BOTH, expand=True)
+
+        self.battle_listbox = tk.Listbox(list_container, font=("Consolas", 9), height=12)
+        scrollbar = ttk.Scrollbar(list_container, orient=tk.VERTICAL, command=self.battle_listbox.yview)
+        self.battle_listbox.configure(yscrollcommand=scrollbar.set)
+
+        self.battle_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Bind selection
+        self.battle_listbox.bind("<<ListboxSelect>>", self._on_listbox_select)
+
+        logger.info("Fallback Listbox created successfully")
+
+    def _on_tree_select(self, event=None):
+        """Handle Treeview selection"""
+        try:
+            selection = self.battle_tree.selection()
+            if not selection:
+                return
+
+            item = self.battle_tree.item(selection[0])
+            battle_id_short = item.get('text', '')
+
+            # Find battle by short ID
+            for battle in self.battles:
+                if battle.id and battle.id.startswith(battle_id_short):
+                    self._display_battle_details_safe(battle)
+                    break
+
+        except Exception as e:
+            logger.error(f"Error handling tree selection: {e}")
+
+    def _on_listbox_select(self, event=None):
+        """Handle Listbox selection"""
+        try:
+            selection = self.battle_listbox.curselection()
+            if not selection:
+                return
+
+            index = selection[0]
+            if 0 <= index < len(self.battles):
+                battle = self.battles[index]
+                self._display_battle_details_safe(battle)
+
+        except Exception as e:
+            logger.error(f"Error handling listbox selection: {e}")
+
+    def _load_battles_safe(self):
+        """Safely load battles with improved UI formatting"""
+        try:
+            logger.info("Loading battles safely")
+
+            # Clear existing items
+            if self._use_treeview:
+                for item in self.battle_tree.get_children():
+                    self.battle_tree.delete(item)
+            else:
+                self.battle_listbox.delete(0, tk.END)
+
+            self.battles = []
+
+            # Get limited number of battles
+            limit = min(int(self.limit_var.get()), 20)
+            battles = self.db_manager.get_recent_battles(limit=limit)
+
+            for i, battle in enumerate(battles):
+                try:
+                    # Get basic info safely
+                    battle_id_short = battle.id[:8] if battle.id else "Unknown"
+
+                    # Get character names with fallback
+                    char1_name = "Unknown"
+                    char2_name = "Unknown"
+                    try:
+                        char1 = self.db_manager.get_character(battle.character1_id)
+                        char2 = self.db_manager.get_character(battle.character2_id)
+                        if char1:
+                            char1_name = char1.name[:12]  # Truncate for better display
+                        if char2:
+                            char2_name = char2.name[:12]
+                    except Exception:
+                        pass
+
+                    # Determine winner
+                    winner_name = "Draw"
+                    if battle.winner_id:
+                        if battle.winner_id == battle.character1_id:
+                            winner_name = char1_name
+                        elif battle.winner_id == battle.character2_id:
+                            winner_name = char2_name
+
+                    # Format date
+                    try:
+                        date_str = battle.created_at.strftime("%m/%d %H:%M")
+                    except Exception:
+                        date_str = "Unknown"
+
+                    # Format duration
+                    duration_str = f"{battle.duration:.1f}" if battle.duration else "0.0"
+
+                    # Add to appropriate widget
+                    if self._use_treeview:
+                        # Use Treeview with nice columns
+                        fighters_text = f"{char1_name} vs {char2_name}"
+                        self.battle_tree.insert("", tk.END,
+                                              text=battle_id_short,
+                                              values=(date_str, fighters_text, winner_name, duration_str))
+                    else:
+                        # Use Listbox with formatted text
+                        battle_text = f"{battle_id_short} | {date_str} | {char1_name} vs {char2_name} | Winner: {winner_name}"
+                        self.battle_listbox.insert(tk.END, battle_text)
+
+                    self.battles.append(battle)
+
+                except Exception as battle_e:
+                    logger.warning(f"Error processing battle {i}: {battle_e}")
+                    continue
+
+            logger.info(f"Loaded {len(self.battles)} battles safely")
+
+            # Clear detail text
+            self._show_detail_text("Select a battle to view details")
+
+        except Exception as e:
+            logger.error(f"Error loading battles: {e}")
+            try:
+                import tkinter.messagebox as messagebox
+                messagebox.showerror("Error", f"Failed to load battles: {e}")
+            except:
+                pass
+
+    def _on_limit_change(self, event=None):
+        """Handle limit change"""
+        self._load_battles_safe()
+
+    def _on_battle_select_safe(self, event=None):
+        """Handle battle selection safely"""
+        try:
+            selection = self.battle_listbox.curselection()
+            if not selection:
+                return
+
+            index = selection[0]
+            if 0 <= index < len(self.battles):
+                battle = self.battles[index]
+                self._display_battle_details_safe(battle)
+
+        except Exception as e:
+            logger.error(f"Error handling battle selection: {e}")
+
+    def _display_battle_details_safe(self, battle):
+        """Display battle details with improved formatting"""
+        try:
+            if not battle:
+                self._show_detail_text("No battle selected")
+                return
+
+            details = []
+
+            # Header with battle ID
+            details.append("=" * 50)
+            details.append(f"⚔️ BATTLE DETAILS")
+            details.append("=" * 50)
+            details.append(f"ID: {battle.id}")
+            details.append("")
+
+            # Date and time
+            if battle.created_at:
+                try:
+                    date_str = battle.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                    details.append(f"📅 Date: {date_str}")
+                except Exception:
+                    details.append("📅 Date: Unknown")
+
+            # Get character information
+            char1_name = "Unknown"
+            char2_name = "Unknown"
+            char1_stats = ""
+            char2_stats = ""
+
+            try:
+                char1 = self.db_manager.get_character(battle.character1_id)
+                char2 = self.db_manager.get_character(battle.character2_id)
+
+                if char1:
+                    char1_name = char1.name
+                    char1_stats = f" (HP:{char1.hp} ATK:{char1.attack} DEF:{char1.defense})"
+
+                if char2:
+                    char2_name = char2.name
+                    char2_stats = f" (HP:{char2.hp} ATK:{char2.attack} DEF:{char2.defense})"
+
+            except Exception:
+                pass
+
+            # Battle participants
+            details.append("")
+            details.append("👥 FIGHTERS:")
+            details.append(f"   🔵 {char1_name}{char1_stats}")
+            details.append(f"   🔴 {char2_name}{char2_stats}")
+
+            # Winner
+            winner_name = "Draw"
+            winner_emoji = "🤝"
+            if battle.winner_id:
+                if battle.winner_id == battle.character1_id:
+                    winner_name = char1_name
+                    winner_emoji = "🔵🏆"
+                elif battle.winner_id == battle.character2_id:
+                    winner_name = char2_name
+                    winner_emoji = "🔴🏆"
+
+            details.append("")
+            details.append(f"{winner_emoji} WINNER: {winner_name}")
+
+            # Battle statistics
+            details.append("")
+            details.append("📊 STATISTICS:")
+            details.append(f"   ⏱️ Duration: {battle.duration:.2f}s" if battle.duration else "   ⏱️ Duration: Unknown")
+
+            turn_count = len(battle.turns) if battle.turns else 0
+            details.append(f"   🔄 Turns: {turn_count}")
+
+            # Battle log preview
+            details.append("")
+            details.append("📜 BATTLE LOG (Preview):")
+            details.append("-" * 40)
+
+            if battle.battle_log:
+                # Show first 8 entries for better readability
+                log_entries = battle.battle_log[:8]
+                for i, entry in enumerate(log_entries):
+                    if entry:
+                        # Clean up entry and limit length
+                        clean_entry = str(entry).strip()[:80]
+                        details.append(f"{i+1:2d}. {clean_entry}")
+
+                if len(battle.battle_log) > 8:
+                    remaining = len(battle.battle_log) - 8
+                    details.append(f"     ... {remaining} more entries")
+            else:
+                details.append("     No battle log available")
+
+            details.append("")
+            details.append("=" * 50)
+
+            self._show_detail_text("\n".join(details))
+
+        except Exception as e:
+            logger.error(f"Error displaying battle details: {e}")
+            self._show_detail_text(f"❌ Error displaying details: {e}")
+
+    def _show_detail_text(self, text):
+        """Show text in detail area"""
+        try:
+            self.detail_text.config(state=tk.NORMAL)
+            self.detail_text.delete(1.0, tk.END)
+            self.detail_text.insert(1.0, text)
+            self.detail_text.config(state=tk.DISABLED)
+        except Exception as e:
+            logger.error(f"Error showing detail text: {e}")
+
     def _create_widgets(self):
         """Create battle history window widgets"""
         # Main frame
@@ -1109,37 +1521,75 @@ class BattleHistoryWindow:
         list_frame = ttk.Frame(main_frame)
         list_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Treeview for battle list
-        self.tree = ttk.Treeview(list_frame, columns=("date", "char1", "char2", "winner", "duration", "turns"), 
-                                show="tree headings", height=15)
+        # Safer Treeview initialization to prevent segfault
+        try:
+            # Use more basic column configuration to avoid memory issues
+            self.tree = ttk.Treeview(list_frame, height=15)
+
+            # Configure columns step by step with error handling
+            self.tree["columns"] = ("date", "char1", "char2", "winner", "duration", "turns")
+            self.tree["show"] = "tree headings"
+
+            # Define headings safely
+            try:
+                self.tree.heading("#0", text="ID")
+                self.tree.heading("date", text="日時")
+                self.tree.heading("char1", text="キャラクター1")
+                self.tree.heading("char2", text="キャラクター2")
+                self.tree.heading("winner", text="勝者")
+                self.tree.heading("duration", text="時間(秒)")
+                self.tree.heading("turns", text="ターン数")
+            except Exception as heading_e:
+                logger.warning(f"Error setting headings: {heading_e}")
+                # Fallback to English headings
+                self.tree.heading("#0", text="ID")
+                self.tree.heading("date", text="Date")
+                self.tree.heading("char1", text="Character1")
+                self.tree.heading("char2", text="Character2")
+                self.tree.heading("winner", text="Winner")
+                self.tree.heading("duration", text="Duration")
+                self.tree.heading("turns", text="Turns")
+
+            # Define column widths safely
+            try:
+                self.tree.column("#0", width=80, minwidth=50)
+                self.tree.column("date", width=120, minwidth=80)
+                self.tree.column("char1", width=120, minwidth=80)
+                self.tree.column("char2", width=120, minwidth=80)
+                self.tree.column("winner", width=120, minwidth=80)
+                self.tree.column("duration", width=80, minwidth=60)
+                self.tree.column("turns", width=80, minwidth=60)
+            except Exception as col_e:
+                logger.warning(f"Error setting column widths: {col_e}")
+
+        except Exception as tree_e:
+            logger.error(f"Error creating Treeview: {tree_e}")
+            # Fallback: create minimal listbox if Treeview fails
+            self.tree = tk.Listbox(list_frame, height=15)
+            self._use_listbox_fallback = True
         
-        # Define headings
-        self.tree.heading("#0", text="ID")
-        self.tree.heading("date", text="日時")
-        self.tree.heading("char1", text="キャラクター1")
-        self.tree.heading("char2", text="キャラクター2")
-        self.tree.heading("winner", text="勝者")
-        self.tree.heading("duration", text="時間(秒)")
-        self.tree.heading("turns", text="ターン数")
-        
-        # Define column widths
-        self.tree.column("#0", width=80)
-        self.tree.column("date", width=120)
-        self.tree.column("char1", width=120)
-        self.tree.column("char2", width=120)
-        self.tree.column("winner", width=120)
-        self.tree.column("duration", width=80)
-        self.tree.column("turns", width=80)
-        
-        # Scrollbars
-        v_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
-        h_scrollbar = ttk.Scrollbar(list_frame, orient=tk.HORIZONTAL, command=self.tree.xview)
-        self.tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
-        
-        # Pack treeview and scrollbars
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        # Initialize fallback flag
+        self._use_listbox_fallback = getattr(self, '_use_listbox_fallback', False)
+
+        # Scrollbars with error handling
+        try:
+            v_scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
+            if not self._use_listbox_fallback:
+                h_scrollbar = ttk.Scrollbar(list_frame, orient=tk.HORIZONTAL, command=self.tree.xview)
+                self.tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+            else:
+                self.tree.configure(yscrollcommand=v_scrollbar.set)
+
+            # Pack treeview and scrollbars
+            self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            if not self._use_listbox_fallback:
+                h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        except Exception as scroll_e:
+            logger.warning(f"Error setting up scrollbars: {scroll_e}")
+            # Fallback: just pack the tree without scrollbars
+            self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         # Detail frame
         detail_frame = ttk.LabelFrame(main_frame, text="📋 バトル詳細", padding=10)
@@ -1152,68 +1602,93 @@ class BattleHistoryWindow:
         self.detail_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         detail_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Bind selection event
-        self.tree.bind("<<TreeviewSelect>>", self._on_battle_select)
-        
+        # Bind selection event with error handling
+        try:
+            if not self._use_listbox_fallback:
+                self.tree.bind("<<TreeviewSelect>>", self._on_battle_select)
+            else:
+                self.tree.bind("<<ListboxSelect>>", self._on_listbox_select)
+        except Exception as bind_e:
+            logger.warning(f"Error binding selection event: {bind_e}")
+
         # Close button
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=(10, 0))
-        ttk.Button(button_frame, text="閉じる", command=self.window.destroy).pack()
+        ttk.Button(button_frame, text="閉じる", command=self._on_close).pack()
     
     def _load_battle_history(self):
-        """Load battle history from database"""
+        """Load battle history from database with improved error handling"""
         try:
-            limit = int(self.limit_var.get())
+            # Limit battles to prevent memory issues
+            limit = min(int(self.limit_var.get()), 50)  # Cap at 50 to prevent segfaults
             battles = self.db_manager.get_recent_battles(limit=limit)
-            
-            # Clear existing items
-            for item in self.tree.get_children():
-                self.tree.delete(item)
-            
-            # Add battles to tree
+            self.battles = battles  # Store for reference
+
+            # Clear existing items safely
+            try:
+                if not self._use_listbox_fallback:
+                    for item in self.tree.get_children():
+                        self.tree.delete(item)
+                else:
+                    self.tree.delete(0, tk.END)
+            except Exception as clear_e:
+                logger.warning(f"Error clearing tree: {clear_e}")
+
+            # Process battles with more conservative memory usage
+            processed_count = 0
             for battle in battles:
+                if processed_count >= 50:  # Safety limit
+                    break
                 try:
-                    # Get character names safely
-                    char1 = None
-                    char2 = None
+                    # Get character names safely with simplified logic
+                    char1_name = "Unknown"
+                    char2_name = "Unknown"
                     try:
                         char1 = self.db_manager.get_character(battle.character1_id)
                         char2 = self.db_manager.get_character(battle.character2_id)
+                        char1_name = char1.name if char1 else "Unknown"
+                        char2_name = char2.name if char2 else "Unknown"
                     except Exception as char_e:
                         logger.warning(f"Error getting character data: {char_e}")
-                    
-                    char1_name = char1.name if char1 else "Unknown"
-                    char2_name = char2.name if char2 else "Unknown"
-                    
+
                     # Determine winner name safely
-                    winner_name = "引き分け"
+                    winner_name = "Draw"  # Use English to avoid encoding issues
                     if battle.winner_id:
                         if battle.winner_id == battle.character1_id:
                             winner_name = char1_name
                         elif battle.winner_id == battle.character2_id:
                             winner_name = char2_name
-                        else:
-                            winner_name = "Unknown"
-                    
+
                     # Format date safely
                     try:
                         date_str = battle.created_at.strftime("%m/%d %H:%M")
                     except Exception:
                         date_str = "Unknown"
-                    
+
                     # Get turn count safely
                     turn_count = 0
                     try:
                         turn_count = len(battle.turns) if battle.turns else 0
                     except Exception:
                         turn_count = 0
-                    
-                    # Insert into tree
-                    self.tree.insert("", tk.END, 
-                                   text=battle.id[:8] if battle.id else "Unknown",
-                                   values=(date_str, char1_name, char2_name, winner_name, 
-                                         f"{battle.duration:.2f}" if battle.duration else "0.00", 
-                                         turn_count))
+
+                    # Insert into display with safer approach
+                    battle_id_short = battle.id[:8] if battle.id else "Unknown"
+                    duration_str = f"{battle.duration:.2f}" if battle.duration else "0.00"
+
+                    if not self._use_listbox_fallback:
+                        # Use Treeview
+                        self.tree.insert("", tk.END,
+                                       text=battle_id_short,
+                                       values=(date_str, char1_name, char2_name, winner_name,
+                                             duration_str, turn_count))
+                    else:
+                        # Use Listbox fallback
+                        battle_info = f"{battle_id_short} | {date_str} | {char1_name} vs {char2_name} | Winner: {winner_name}"
+                        self.tree.insert(tk.END, battle_info)
+
+                    processed_count += 1
+
                 except Exception as battle_e:
                     logger.warning(f"Error processing battle {battle.id if battle else 'Unknown'}: {battle_e}")
                     continue
@@ -1223,7 +1698,7 @@ class BattleHistoryWindow:
             # Show error message to user
             try:
                 import tkinter.messagebox as messagebox
-                messagebox.showerror("エラー", f"バトル履歴の読み込みに失敗しました: {e}")
+                messagebox.showerror("Error", f"Failed to load battle history: {e}")
             except:
                 pass
     
@@ -1358,6 +1833,52 @@ class BattleHistoryWindow:
             logger.error(f"Error displaying battle details: {e}")
             self._show_detail_error(f"詳細表示エラー: {e}")
     
+    def _on_listbox_select(self, event=None):
+        """Handle listbox selection for fallback mode"""
+        try:
+            selection = self.tree.curselection()
+            if not selection:
+                return
+
+            # Get selected battle from index
+            index = selection[0]
+            if 0 <= index < len(self.battles):
+                battle = self.battles[index]
+                self._display_battle_details(battle)
+            else:
+                self._show_detail_error("Invalid battle selection")
+
+        except Exception as e:
+            logger.error(f"Error handling listbox selection: {e}")
+            self._show_detail_error(f"Selection error: {e}")
+
+    def _on_close(self):
+        """Handle window close event safely"""
+        try:
+            logger.info("Closing BattleHistoryWindow")
+            # Clear data references to help with garbage collection
+            self.battles = []
+            self.selected_battle = None
+
+            if hasattr(self, 'window') and self.window:
+                self.window.destroy()
+        except Exception as e:
+            logger.error(f"Error closing battle history window: {e}")
+
+    def _safe_close(self):
+        """Safely close the window"""
+        try:
+            logger.info("Safe close BattleHistoryWindow")
+            # Clear references
+            self.battles = []
+            if hasattr(self, 'selected_battle'):
+                self.selected_battle = None
+
+            if hasattr(self, 'window') and self.window:
+                self.window.destroy()
+        except Exception as e:
+            logger.error(f"Error in safe close: {e}")
+
     def _show_detail_error(self, message):
         """Show error message in detail text"""
         try:
