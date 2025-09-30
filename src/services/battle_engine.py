@@ -440,21 +440,27 @@ class BattleEngine:
             return
 
         try:
+            # Get screen size and calculate scale
+            screen_width = self.screen.get_width()
+            screen_height = self.screen.get_height()
+            scale_x = screen_width / 1024
+            scale_y = screen_height / 768
+
             # Get recent battle logs
             recent_logs = self.current_battle.battle_log[-5:] if self.current_battle else []
 
-            # Determine attacker and defender
+            # Determine attacker and defender with scaled positions
             if turn.attacker_id == char1.id:
                 attacker, defender = char1, char2
-                attacker_pos = (200, 300)
-                defender_pos = (Settings.SCREEN_WIDTH - 200, 300)
+                attacker_pos = (int(200 * scale_x), int(300 * scale_y))
+                defender_pos = (int((screen_width - 200 * scale_x)), int(300 * scale_y))
                 # Defender is char2
                 defender_hp_before = char2_hp
                 defender_hp_after = turn.defender_hp_after
             else:
                 attacker, defender = char2, char1
-                attacker_pos = (Settings.SCREEN_WIDTH - 200, 300)
-                defender_pos = (200, 300)
+                attacker_pos = (int((screen_width - 200 * scale_x)), int(300 * scale_y))
+                defender_pos = (int(200 * scale_x), int(300 * scale_y))
                 # Defender is char1
                 defender_hp_before = char1_hp
                 defender_hp_after = turn.defender_hp_after
@@ -571,6 +577,13 @@ class BattleEngine:
             return
 
         try:
+            # Get actual screen size and calculate scale
+            screen_width = self.screen.get_width()
+            screen_height = self.screen.get_height()
+            scale_x = screen_width / 1024
+            scale_y = screen_height / 768
+            scale = min(scale_x, scale_y)
+
             # Update effect systems
             if self.effects:
                 self.effects.update(1.0)
@@ -582,18 +595,17 @@ class BattleEngine:
             self.screen.fill((240, 248, 255))
 
             # Draw battle arena
-            arena_rect = pygame.Rect(
-                50 + shake_offset[0],
-                100 + shake_offset[1],
-                Settings.SCREEN_WIDTH - 100,
-                400
-            )
+            arena_x = int(50 * scale_x) + shake_offset[0]
+            arena_y = int(100 * scale_y) + shake_offset[1]
+            arena_width = screen_width - int(100 * scale_x)
+            arena_height = int(400 * scale_y)
+            arena_rect = pygame.Rect(arena_x, arena_y, arena_width, arena_height)
             pygame.draw.rect(self.screen, (200, 220, 200), arena_rect)
-            pygame.draw.rect(self.screen, (100, 100, 100), arena_rect, 3)
+            pygame.draw.rect(self.screen, (100, 100, 100), arena_rect, int(3 * scale))
 
             # Character positions with animation offsets
-            char1_base_pos = (200, 300)
-            char2_base_pos = (Settings.SCREEN_WIDTH - 200, 300)
+            char1_base_pos = (int(200 * scale_x), int(300 * scale_y))
+            char2_base_pos = (int((screen_width - 200 * scale_x)), int(300 * scale_y))
 
             char1_offset = self.animator.get_offset(char1.id) if self.animator else (0, 0)
             char2_offset = self.animator.get_offset(char2.id) if self.animator else (0, 0)
@@ -607,18 +619,18 @@ class BattleEngine:
                 char2_base_pos[1] + int(char2_offset[1]) + shake_offset[1]
             )
 
-            # Draw characters
-            self._draw_character(char1, char1_pos, char1_hp)
-            self._draw_character(char2, char2_pos, char2_hp)
+            # Draw characters (pass scale for proper sizing)
+            self._draw_character(char1, char1_pos, char1_hp, scale)
+            self._draw_character(char2, char2_pos, char2_hp, scale)
 
             # Draw HP bars
-            self._draw_hp_bars(char1, char2, char1_pos, char2_pos, char1_hp, char2_hp, shake_offset)
+            self._draw_hp_bars(char1, char2, char1_pos, char2_pos, char1_hp, char2_hp, shake_offset, scale)
 
             # Draw character names
             name1_surface = self.font.render(char1.name, True, (0, 0, 0))
             name2_surface = self.font.render(char2.name, True, (0, 0, 0))
-            self.screen.blit(name1_surface, (char1_pos[0] - 40, char1_pos[1] + 70))
-            self.screen.blit(name2_surface, (char2_pos[0] - 40, char2_pos[1] + 70))
+            self.screen.blit(name1_surface, (char1_pos[0] - int(40 * scale), char1_pos[1] + int(70 * scale)))
+            self.screen.blit(name2_surface, (char2_pos[0] - int(40 * scale), char2_pos[1] + int(70 * scale)))
 
             # Draw effects
             if self.effects:
@@ -627,14 +639,15 @@ class BattleEngine:
             # Draw damage text
             if current_turn and not current_turn.is_miss and current_turn.damage > 0:
                 defender_pos = char2_pos if current_turn.attacker_id == char1.id else char1_pos
-                self._draw_damage_text(current_turn, defender_pos)
+                self._draw_damage_text(current_turn, defender_pos, scale)
 
             # Draw recent battle log
             if recent_logs:
-                log_start_y = 520
+                log_start_y = int(520 * scale_y)
+                log_line_height = int(25 * scale_y)
                 for i, log_entry in enumerate(recent_logs):
                     log_surface = self.small_font.render(log_entry, True, (0, 0, 0))
-                    self.screen.blit(log_surface, (50, log_start_y + i * 25))
+                    self.screen.blit(log_surface, (int(50 * scale_x), log_start_y + i * log_line_height))
 
             # Update display
             pygame.display.flip()
@@ -642,41 +655,44 @@ class BattleEngine:
         except Exception as e:
             logger.error(f"Error rendering battle frame: {e}")
 
-    def _draw_hp_bars(self, char1: Character, char2: Character, char1_pos: Tuple[int, int], char2_pos: Tuple[int, int], char1_hp: int, char2_hp: int, shake_offset: List[int]):
+    def _draw_hp_bars(self, char1: Character, char2: Character, char1_pos: Tuple[int, int], char2_pos: Tuple[int, int], char1_hp: int, char2_hp: int, shake_offset: List[int], scale: float = 1.0):
         """Draw HP bars for both characters"""
         try:
-            hp_bar_width = 100
-            hp_bar_height = 20
+            hp_bar_width = int(100 * scale)
+            hp_bar_height = int(20 * scale)
+            hp_bar_offset_x = int(50 * scale)
+            hp_bar_offset_y = int(80 * scale)
 
             # Calculate HP ratios
             char1_hp_ratio = max(0, char1_hp / char1.hp)
             char2_hp_ratio = max(0, char2_hp / char2.hp)
 
             # Character 1 HP bar
-            hp1_bar_rect = pygame.Rect(char1_pos[0] - 50, char1_pos[1] - 80, hp_bar_width, hp_bar_height)
+            hp1_bar_rect = pygame.Rect(char1_pos[0] - hp_bar_offset_x, char1_pos[1] - hp_bar_offset_y, hp_bar_width, hp_bar_height)
             hp1_fill_width = int(hp_bar_width * char1_hp_ratio)
-            hp1_fill_rect = pygame.Rect(char1_pos[0] - 50, char1_pos[1] - 80, hp1_fill_width, hp_bar_height)
+            hp1_fill_rect = pygame.Rect(char1_pos[0] - hp_bar_offset_x, char1_pos[1] - hp_bar_offset_y, hp1_fill_width, hp_bar_height)
 
             pygame.draw.rect(self.screen, (255, 255, 255), hp1_bar_rect)
             pygame.draw.rect(self.screen, (0, 255, 0), hp1_fill_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, 2)
+            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, max(1, int(2 * scale)))
 
             # Character 2 HP bar
-            hp2_bar_rect = pygame.Rect(char2_pos[0] - 50, char2_pos[1] - 80, hp_bar_width, hp_bar_height)
+            hp2_bar_rect = pygame.Rect(char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_bar_offset_y, hp_bar_width, hp_bar_height)
             hp2_fill_width = int(hp_bar_width * char2_hp_ratio)
-            hp2_fill_rect = pygame.Rect(char2_pos[0] - 50, char2_pos[1] - 80, hp2_fill_width, hp_bar_height)
+            hp2_fill_rect = pygame.Rect(char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_bar_offset_y, hp2_fill_width, hp_bar_height)
 
             pygame.draw.rect(self.screen, (255, 255, 255), hp2_bar_rect)
             pygame.draw.rect(self.screen, (0, 255, 0), hp2_fill_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, 2)
+            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, max(1, int(2 * scale)))
 
             # Draw HP text
             hp1_text = f"HP: {char1_hp}/{char1.hp}"
             hp2_text = f"HP: {char2_hp}/{char2.hp}"
             hp1_surface = self.small_font.render(hp1_text, True, (0, 0, 0))
             hp2_surface = self.small_font.render(hp2_text, True, (0, 0, 0))
-            self.screen.blit(hp1_surface, (char1_pos[0] - 50, char1_pos[1] - 100))
-            self.screen.blit(hp2_surface, (char2_pos[0] - 50, char2_pos[1] - 100))
+            hp_text_offset_y = int(100 * scale)
+            self.screen.blit(hp1_surface, (char1_pos[0] - hp_bar_offset_x, char1_pos[1] - hp_text_offset_y))
+            self.screen.blit(hp2_surface, (char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_text_offset_y))
 
         except Exception as e:
             logger.error(f"Error drawing HP bars: {e}")
@@ -706,17 +722,17 @@ class BattleEngine:
         except Exception as e:
             logger.error(f"Error updating battle display: {e}")
     
-    def _draw_damage_text(self, turn: BattleTurn, position: Tuple[int, int]):
+    def _draw_damage_text(self, turn: BattleTurn, position: Tuple[int, int], display_scale: float = 1.0):
         """Draw animated damage text"""
         try:
             # Determine text color and style
             if turn.is_critical:
                 damage_color = (255, 255, 50)  # Bright yellow for critical
-                font_size = 72
+                font_size = int(72 * display_scale)
                 damage_text = f"{turn.damage}!!"
             else:
                 damage_color = (255, 80, 80)  # Red for normal
-                font_size = 52
+                font_size = int(52 * display_scale)
                 damage_text = str(turn.damage)
 
             # Create font for damage text
@@ -725,15 +741,16 @@ class BattleEngine:
             damage_surface = damage_font.render(damage_text, True, damage_color)
 
             # Add floating animation with larger movement
-            float_offset = int(25 * math.sin(pygame.time.get_ticks() * 0.008))
+            float_offset = int(25 * display_scale * math.sin(pygame.time.get_ticks() * 0.008))
             text_pos = (position[0] - damage_surface.get_width() // 2,
-                       position[1] - 180 - float_offset)
+                       position[1] - int(180 * display_scale) - float_offset)
 
             # Draw text with thicker outline for better visibility
             try:
                 outline_surface = damage_font.render(damage_text, True, (0, 0, 0))
-                for dx in [-3, -1, 0, 1, 3]:
-                    for dy in [-3, -1, 0, 1, 3]:
+                outline_offset = int(3 * display_scale)
+                for dx in [-outline_offset, -1, 0, 1, outline_offset]:
+                    for dy in [-outline_offset, -1, 0, 1, outline_offset]:
                         if dx != 0 or dy != 0:
                             self.screen.blit(outline_surface, (text_pos[0] + dx, text_pos[1] + dy))
             except:
@@ -756,10 +773,10 @@ class BattleEngine:
         except Exception as e:
             logger.warning(f"Failed to start battle BGM: {e}")
     
-    def _draw_character(self, character: Character, position: Tuple[int, int], current_hp: int):
+    def _draw_character(self, character: Character, position: Tuple[int, int], current_hp: int, display_scale: float = 1.0):
         """Draw character with image or fallback to colored rectangle"""
         try:
-            max_width, max_height = 120, 120  # Maximum display size
+            max_width, max_height = int(120 * display_scale), int(120 * display_scale)  # Maximum display size
 
             # Try to load and display character image
             character_sprite = self._load_character_sprite(character)
@@ -769,10 +786,10 @@ class BattleEngine:
                 original_width, original_height = character_sprite.get_size()
                 scale_x = max_width / original_width
                 scale_y = max_height / original_height
-                scale = min(scale_x, scale_y)  # Use smaller scale to fit within bounds
+                char_scale = min(scale_x, scale_y)  # Use smaller scale to fit within bounds
 
-                new_width = int(original_width * scale)
-                new_height = int(original_height * scale)
+                new_width = int(original_width * char_scale)
+                new_height = int(original_height * char_scale)
 
                 scaled_sprite = pygame.transform.scale(character_sprite, (new_width, new_height))
 
@@ -795,7 +812,7 @@ class BattleEngine:
                 self.screen.blit(scaled_sprite, (char_x, char_y))
             else:
                 # Fallback to colored rectangle
-                char_width, char_height = 80, 120
+                char_width, char_height = int(80 * display_scale), int(120 * display_scale)
                 char_x = position[0] - char_width // 2
                 char_y = position[1] - char_height // 2
                 char_rect = pygame.Rect(char_x, char_y, char_width, char_height)
@@ -803,14 +820,16 @@ class BattleEngine:
                 char_color = (int(255 * (1 - hp_ratio)), int(255 * hp_ratio), 0)
 
                 pygame.draw.rect(self.screen, char_color, char_rect)
-                pygame.draw.rect(self.screen, (0, 0, 0), char_rect, 2)
+                pygame.draw.rect(self.screen, (0, 0, 0), char_rect, max(1, int(2 * display_scale)))
 
         except Exception as e:
             logger.error(f"Error drawing character {character.name}: {e}")
             # Emergency fallback - draw simple rectangle
-            char_rect = pygame.Rect(position[0] - 40, position[1] - 60, 80, 120)
+            fallback_width, fallback_height = int(80 * display_scale), int(120 * display_scale)
+            char_rect = pygame.Rect(position[0] - fallback_width // 2, position[1] - fallback_height // 2,
+                                   fallback_width, fallback_height)
             pygame.draw.rect(self.screen, (128, 128, 128), char_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), char_rect, 2)
+            pygame.draw.rect(self.screen, (0, 0, 0), char_rect, max(1, int(2 * display_scale)))
     
     def _load_character_sprite(self, character: Character) -> Optional[pygame.Surface]:
         """Load character sprite with caching"""
@@ -872,13 +891,22 @@ class BattleEngine:
             return
 
         try:
+            # Get actual screen size
+            screen_width = self.screen.get_width()
+            screen_height = self.screen.get_height()
+
+            # Calculate scale factor based on screen size (base: 1024x768)
+            scale_x = screen_width / 1024
+            scale_y = screen_height / 768
+            scale = min(scale_x, scale_y)  # Use the smaller scale to maintain aspect ratio
+
             # Clear any pending events first
             pygame.event.clear()
 
             # Draw gradient background overlay
-            for y in range(Settings.SCREEN_HEIGHT):
-                alpha = int(230 * (y / Settings.SCREEN_HEIGHT))
-                line_surface = pygame.Surface((Settings.SCREEN_WIDTH, 1))
+            for y in range(screen_height):
+                alpha = int(230 * (y / screen_height))
+                line_surface = pygame.Surface((screen_width, 1))
                 line_surface.set_alpha(alpha)
                 line_surface.fill((20, 20, 40))
                 self.screen.blit(line_surface, (0, y))
@@ -904,7 +932,7 @@ class BattleEngine:
                 winner_bg_color = (60, 60, 60)  # Dark gray
 
             # Draw large "VICTORY" or "DRAW" text at top
-            victory_font = self._create_font(120)
+            victory_font = self._create_font(int(120 * scale))
 
             if winner:
                 victory_text = "VICTORY!"
@@ -914,16 +942,37 @@ class BattleEngine:
                 victory_surface = victory_font.render(victory_text, True, winner_color)
 
             # Draw with glow effect
-            for offset in [(0, 0), (-3, -3), (3, 3), (-3, 3), (3, -3)]:
+            glow_offset = int(3 * scale)
+            victory_y = int(60 * scale_y)
+            for offset in [(0, 0), (-glow_offset, -glow_offset), (glow_offset, glow_offset),
+                          (-glow_offset, glow_offset), (glow_offset, -glow_offset)]:
                 glow_surface = victory_font.render(victory_text, True, winner_bg_color)
-                glow_rect = glow_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2 + offset[0], 80 + offset[1]))
+                glow_rect = glow_surface.get_rect(center=(screen_width // 2 + offset[0], victory_y + offset[1]))
                 self.screen.blit(glow_surface, glow_rect)
 
-            victory_rect = victory_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, 80))
+            victory_rect = victory_surface.get_rect(center=(screen_width // 2, victory_y))
             self.screen.blit(victory_surface, victory_rect)
 
-            # Draw character images side by side
-            char_display_size = 200
+            # Draw winner name with large font (below VICTORY text)
+            name_font = self._create_font(int(60 * scale))
+            winner_name_surface = name_font.render(winner_name, True, winner_color)
+            # Draw with outline
+            outline_offset = int(2 * scale)
+            name_y = int(150 * scale_y)
+            for dx in [-outline_offset, 0, outline_offset]:
+                for dy in [-outline_offset, 0, outline_offset]:
+                    if dx != 0 or dy != 0:
+                        outline_surface = name_font.render(winner_name, True, (0, 0, 0))
+                        outline_rect = outline_surface.get_rect(center=(screen_width // 2 + dx, name_y + dy))
+                        self.screen.blit(outline_surface, outline_rect)
+
+            name_rect = winner_name_surface.get_rect(center=(screen_width // 2, name_y))
+            self.screen.blit(winner_name_surface, name_rect)
+
+            # Draw character images side by side (in the middle area)
+            char_display_size = int(180 * scale)
+            char_y_winner = int(220 * scale_y)
+            char_x_offset = int(220 * scale_x)
 
             # Winner character (left side, larger)
             if winner:
@@ -931,44 +980,51 @@ class BattleEngine:
                 if winner_sprite:
                     # Scale to fit
                     original_w, original_h = winner_sprite.get_size()
-                    scale = min(char_display_size / original_w, char_display_size / original_h)
-                    new_w, new_h = int(original_w * scale * 1.3), int(original_h * scale * 1.3)  # 30% larger for winner
+                    char_scale = min(char_display_size / original_w, char_display_size / original_h)
+                    new_w, new_h = int(original_w * char_scale * 1.2), int(original_h * char_scale * 1.2)  # 20% larger for winner
                     scaled_winner = pygame.transform.scale(winner_sprite, (new_w, new_h))
 
                     # Draw winner with golden border
-                    winner_pos = (Settings.SCREEN_WIDTH // 2 - 250, Settings.SCREEN_HEIGHT // 2 - 50)
-                    border_rect = pygame.Rect(winner_pos[0] - 10, winner_pos[1] - 10, new_w + 20, new_h + 20)
-                    pygame.draw.rect(self.screen, winner_color, border_rect, 8)
-                    pygame.draw.rect(self.screen, winner_bg_color, border_rect, 4)
+                    winner_pos = (screen_width // 2 - char_x_offset, char_y_winner)
+                    border_width = int(8 * scale)
+                    border_padding = int(10 * scale)
+                    border_rect = pygame.Rect(winner_pos[0] - border_padding, winner_pos[1] - border_padding,
+                                             new_w + border_padding * 2, new_h + border_padding * 2)
+                    pygame.draw.rect(self.screen, winner_color, border_rect, border_width)
+                    pygame.draw.rect(self.screen, winner_bg_color, border_rect, int(4 * scale))
                     self.screen.blit(scaled_winner, winner_pos)
 
                     # Draw crown symbol above winner (using simple shapes instead of emoji)
                     crown_center_x = winner_pos[0] + new_w // 2
-                    crown_center_y = winner_pos[1] - 40
+                    crown_center_y = winner_pos[1] - int(40 * scale)
+                    crown_size = scale
 
                     # Draw crown shape with triangles
                     crown_points = [
-                        (crown_center_x, crown_center_y - 15),  # Top point
-                        (crown_center_x - 20, crown_center_y),   # Left point
-                        (crown_center_x - 15, crown_center_y + 10), # Left base
-                        (crown_center_x + 15, crown_center_y + 10), # Right base
-                        (crown_center_x + 20, crown_center_y),   # Right point
+                        (crown_center_x, crown_center_y - int(15 * crown_size)),  # Top point
+                        (crown_center_x - int(20 * crown_size), crown_center_y),   # Left point
+                        (crown_center_x - int(15 * crown_size), crown_center_y + int(10 * crown_size)), # Left base
+                        (crown_center_x + int(15 * crown_size), crown_center_y + int(10 * crown_size)), # Right base
+                        (crown_center_x + int(20 * crown_size), crown_center_y),   # Right point
                     ]
                     pygame.draw.polygon(self.screen, winner_color, crown_points)
-                    pygame.draw.polygon(self.screen, winner_bg_color, crown_points, 3)
+                    pygame.draw.polygon(self.screen, winner_bg_color, crown_points, int(3 * scale))
 
                     # Crown jewels (circles)
-                    pygame.draw.circle(self.screen, (255, 50, 50), (crown_center_x, crown_center_y - 10), 5)
-                    pygame.draw.circle(self.screen, (50, 255, 50), (crown_center_x - 15, crown_center_y), 4)
-                    pygame.draw.circle(self.screen, (50, 50, 255), (crown_center_x + 15, crown_center_y), 4)
+                    pygame.draw.circle(self.screen, (255, 50, 50),
+                                     (crown_center_x, crown_center_y - int(10 * crown_size)), int(5 * crown_size))
+                    pygame.draw.circle(self.screen, (50, 255, 50),
+                                     (crown_center_x - int(15 * crown_size), crown_center_y), int(4 * crown_size))
+                    pygame.draw.circle(self.screen, (50, 50, 255),
+                                     (crown_center_x + int(15 * crown_size), crown_center_y), int(4 * crown_size))
 
                 # Loser character (right side, smaller, dimmed)
                 if loser:
                     loser_sprite = self._load_character_sprite(loser)
                     if loser_sprite:
                         original_w, original_h = loser_sprite.get_size()
-                        scale = min(char_display_size / original_w, char_display_size / original_h)
-                        new_w, new_h = int(original_w * scale * 0.8), int(original_h * scale * 0.8)  # 20% smaller for loser
+                        char_scale_loser = min(char_display_size / original_w, char_display_size / original_h)
+                        new_w, new_h = int(original_w * char_scale_loser * 0.75), int(original_h * char_scale_loser * 0.75)  # 25% smaller for loser
                         scaled_loser = pygame.transform.scale(loser_sprite, (new_w, new_h))
 
                         # Apply gray overlay
@@ -978,38 +1034,31 @@ class BattleEngine:
                         scaled_loser.blit(gray_overlay, (0, 0))
 
                         # Draw loser with gray border
-                        loser_pos = (Settings.SCREEN_WIDTH // 2 + 100, Settings.SCREEN_HEIGHT // 2 - 20)
-                        border_rect = pygame.Rect(loser_pos[0] - 5, loser_pos[1] - 5, new_w + 10, new_h + 10)
-                        pygame.draw.rect(self.screen, (100, 100, 100), border_rect, 4)
+                        char_y_loser = int(250 * scale_y)
+                        loser_x_offset = int(80 * scale_x)
+                        loser_pos = (screen_width // 2 + loser_x_offset, char_y_loser)
+                        loser_border_padding = int(5 * scale)
+                        border_rect = pygame.Rect(loser_pos[0] - loser_border_padding, loser_pos[1] - loser_border_padding,
+                                                 new_w + loser_border_padding * 2, new_h + loser_border_padding * 2)
+                        pygame.draw.rect(self.screen, (100, 100, 100), border_rect, int(4 * scale))
                         self.screen.blit(scaled_loser, loser_pos)
 
-            # Draw winner name with large font
-            name_font = self._create_font(72)
-
-            winner_name_surface = name_font.render(winner_name, True, winner_color)
-            # Draw with outline
-            for dx in [-3, 0, 3]:
-                for dy in [-3, 0, 3]:
-                    if dx != 0 or dy != 0:
-                        outline_surface = name_font.render(winner_name, True, (0, 0, 0))
-                        outline_rect = outline_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2 + dx, 180 + dy))
-                        self.screen.blit(outline_surface, outline_rect)
-
-            name_rect = winner_name_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, 180))
-            self.screen.blit(winner_name_surface, name_rect)
-
             # Draw battle stats with better formatting
-            stats_y = Settings.SCREEN_HEIGHT - 220
+            stats_y = screen_height - int(240 * scale_y)
+            panel_width = int(600 * scale_x)
+            panel_height = int(130 * scale_y)
+            panel_x = screen_width // 2 - panel_width // 2
+            panel_padding = int(10 * scale)
 
             # Stats background panel
-            stats_panel = pygame.Rect(Settings.SCREEN_WIDTH // 2 - 300, stats_y - 20, 600, 140)
-            panel_surface = pygame.Surface((600, 140))
+            stats_panel = pygame.Rect(panel_x, stats_y - panel_padding, panel_width, panel_height)
+            panel_surface = pygame.Surface((panel_width, panel_height))
             panel_surface.set_alpha(180)
             panel_surface.fill((40, 40, 60))
-            self.screen.blit(panel_surface, (Settings.SCREEN_WIDTH // 2 - 300, stats_y - 20))
-            pygame.draw.rect(self.screen, winner_color, stats_panel, 3)
+            self.screen.blit(panel_surface, (panel_x, stats_y - panel_padding))
+            pygame.draw.rect(self.screen, winner_color, stats_panel, int(3 * scale))
 
-            stats_font = self._create_font(32)
+            stats_font = self._create_font(int(28 * scale))
 
             # Draw stats with custom icons (no emojis)
             stats_data = [
@@ -1019,52 +1068,64 @@ class BattleEngine:
                 ("HP2", f"{char2.name}: {char2_hp} HP", (255, 100, 100))
             ]
 
+            stat_line_height = int(28 * scale_y)
+            stat_start_y = int(5 * scale)
+            icon_size = int(12 * scale)
+
             for i, (icon_type, stat_text, icon_color) in enumerate(stats_data):
-                stat_y = stats_y + 10 + i * 30
+                stat_y = stats_y + stat_start_y + i * stat_line_height
 
                 # Draw icon on the left
-                icon_x = Settings.SCREEN_WIDTH // 2 - 250
+                icon_x = panel_x + int(50 * scale_x)
+                icon_center_y = stat_y + int(8 * scale)
+
                 if icon_type == "TIME":
                     # Clock icon
-                    pygame.draw.circle(self.screen, icon_color, (icon_x, stat_y + 8), 12, 2)
-                    pygame.draw.line(self.screen, icon_color, (icon_x, stat_y + 8), (icon_x, stat_y + 2), 2)
-                    pygame.draw.line(self.screen, icon_color, (icon_x, stat_y + 8), (icon_x + 6, stat_y + 8), 2)
+                    pygame.draw.circle(self.screen, icon_color, (icon_x, icon_center_y), icon_size, int(2 * scale))
+                    pygame.draw.line(self.screen, icon_color, (icon_x, icon_center_y),
+                                   (icon_x, icon_center_y - int(6 * scale)), int(2 * scale))
+                    pygame.draw.line(self.screen, icon_color, (icon_x, icon_center_y),
+                                   (icon_x + int(6 * scale), icon_center_y), int(2 * scale))
                 elif icon_type == "TURN":
                     # Circular arrow icon
-                    pygame.draw.circle(self.screen, icon_color, (icon_x, stat_y + 8), 10, 2)
-                    pygame.draw.polygon(self.screen, icon_color, [
-                        (icon_x + 8, stat_y + 8),
-                        (icon_x + 12, stat_y + 4),
-                        (icon_x + 12, stat_y + 12)
-                    ])
+                    pygame.draw.circle(self.screen, icon_color, (icon_x, icon_center_y), int(10 * scale), int(2 * scale))
+                    arrow_points = [
+                        (icon_x + int(8 * scale), icon_center_y),
+                        (icon_x + int(12 * scale), icon_center_y - int(4 * scale)),
+                        (icon_x + int(12 * scale), icon_center_y + int(4 * scale))
+                    ]
+                    pygame.draw.polygon(self.screen, icon_color, arrow_points)
                 elif icon_type.startswith("HP"):
                     # Heart icon
-                    pygame.draw.circle(self.screen, icon_color, (icon_x - 4, stat_y + 4), 6)
-                    pygame.draw.circle(self.screen, icon_color, (icon_x + 4, stat_y + 4), 6)
-                    pygame.draw.polygon(self.screen, icon_color, [
-                        (icon_x - 10, stat_y + 4),
-                        (icon_x, stat_y + 14),
-                        (icon_x + 10, stat_y + 4)
-                    ])
+                    pygame.draw.circle(self.screen, icon_color,
+                                     (icon_x - int(4 * scale), icon_center_y - int(4 * scale)), int(6 * scale))
+                    pygame.draw.circle(self.screen, icon_color,
+                                     (icon_x + int(4 * scale), icon_center_y - int(4 * scale)), int(6 * scale))
+                    heart_points = [
+                        (icon_x - int(10 * scale), icon_center_y - int(4 * scale)),
+                        (icon_x, icon_center_y + int(6 * scale)),
+                        (icon_x + int(10 * scale), icon_center_y - int(4 * scale))
+                    ]
+                    pygame.draw.polygon(self.screen, icon_color, heart_points)
 
                 # Draw stat text
                 stat_surface = stats_font.render(stat_text, True, (255, 255, 200))
-                stat_rect = stat_surface.get_rect(left=icon_x + 25, centery=stat_y + 8)
+                stat_rect = stat_surface.get_rect(left=icon_x + int(25 * scale_x), centery=icon_center_y)
                 self.screen.blit(stat_surface, stat_rect)
             
             # Draw OK button with improved styling
-            button_width = 200
-            button_height = 60
-            button_x = Settings.SCREEN_WIDTH // 2 - button_width // 2
-            button_y = Settings.SCREEN_HEIGHT - 80
+            button_width = int(180 * scale_x)
+            button_height = int(50 * scale_y)
+            button_x = screen_width // 2 - button_width // 2
+            button_y = screen_height - int(70 * scale_y)
             button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
 
             # Button with gradient effect
             pygame.draw.rect(self.screen, (100, 180, 100), button_rect)
-            pygame.draw.rect(self.screen, (150, 255, 150), button_rect, 4)
+            pygame.draw.rect(self.screen, (150, 255, 150), button_rect, int(4 * scale))
 
             # Button text
-            button_font = self._create_font(48)
+            button_font = self._create_font(int(40 * scale))
 
             button_text = button_font.render("OK", True, (255, 255, 255))
             button_text_rect = button_text.get_rect(center=button_rect.center)
@@ -1072,10 +1133,10 @@ class BattleEngine:
 
             # Draw instruction text
             instruction_text = "クリックまたはスペースキーで閉じる"
-            instruction_font = self._create_font(24)
+            instruction_font = self._create_font(int(20 * scale))
 
             instruction_surface = instruction_font.render(instruction_text, True, (180, 180, 200))
-            instruction_rect = instruction_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, button_y - 20))
+            instruction_rect = instruction_surface.get_rect(center=(screen_width // 2, button_y - int(15 * scale_y)))
             self.screen.blit(instruction_surface, instruction_rect)
             
             pygame.display.flip()
