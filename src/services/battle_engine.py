@@ -24,17 +24,18 @@ class BattleEngine:
         self.max_turns = Settings.MAX_TURNS
         self.critical_chance = Settings.CRITICAL_CHANCE
         self.critical_multiplier = Settings.CRITICAL_MULTIPLIER
-        
+
         # Battle state
         self.current_battle = None
         self.battle_speed = 0.5  # Battle animation delay in seconds (lower = faster)
-        
+
         # Pygame state - initialize only when needed
         self.pygame_initialized = False
         self.screen = None
         self.clock = None
         self.font = None
         self.small_font = None
+        self.japanese_font_path = None  # Store the path to the Japanese font
         self.battle_sprites = {}
 
         # Effect systems
@@ -83,52 +84,59 @@ class BattleEngine:
                         "C:/Windows/Fonts/msgothic.ttc",  # Windows
                         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Linux fallback
                     ]
-                    
+
                     font_loaded = False
                     for font_path in japanese_fonts:
                         try:
                             if Path(font_path).exists():
                                 self.font = pygame.font.Font(font_path, 28)
+                                self.japanese_font_path = font_path  # Store the font path
                                 font_loaded = True
                                 logger.info(f"Loaded Japanese font: {font_path}")
                                 break
                         except:
                             continue
-                    
+
                     if not font_loaded:
                         # Fallback to default font
                         self.font = pygame.font.Font(None, 36)
+                        self.japanese_font_path = None
                         logger.warning("Could not load Japanese font, using default")
-                        
+
                 except Exception as e:
                     logger.error(f"Error loading font: {e}")
                     self.font = pygame.font.Font(None, 36)
+                    self.japanese_font_path = None
             
             if self.small_font is None:
                 try:
-                    # Same logic for small font
-                    japanese_fonts = [
-                        "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-                        "/usr/share/fonts/truetype/fonts-japanese-mincho.ttf",
-                        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-                        "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",
-                        "C:/Windows/Fonts/msgothic.ttc",
-                        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                    ]
-                    
-                    font_loaded = False
-                    for font_path in japanese_fonts:
-                        try:
-                            if Path(font_path).exists():
-                                self.small_font = pygame.font.Font(font_path, 18)
-                                font_loaded = True
-                                break
-                        except:
-                            continue
-                    
-                    if not font_loaded:
-                        self.small_font = pygame.font.Font(None, 24)
-                        
+                    # Use the same font path if available
+                    if self.japanese_font_path:
+                        self.small_font = pygame.font.Font(self.japanese_font_path, 18)
+                    else:
+                        # Try to load a Japanese font
+                        japanese_fonts = [
+                            "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+                            "/usr/share/fonts/truetype/fonts-japanese-mincho.ttf",
+                            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+                            "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",
+                            "C:/Windows/Fonts/msgothic.ttc",
+                            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                        ]
+
+                        font_loaded = False
+                        for font_path in japanese_fonts:
+                            try:
+                                if Path(font_path).exists():
+                                    self.small_font = pygame.font.Font(font_path, 18)
+                                    font_loaded = True
+                                    break
+                            except:
+                                continue
+
+                        if not font_loaded:
+                            self.small_font = pygame.font.Font(None, 24)
+
                 except Exception as e:
                     logger.error(f"Error loading small font: {e}")
                     self.small_font = pygame.font.Font(None, 24)
@@ -712,10 +720,7 @@ class BattleEngine:
                 damage_text = str(turn.damage)
 
             # Create font for damage text
-            try:
-                damage_font = pygame.font.Font(None, font_size)
-            except:
-                damage_font = self.font  # Fallback to existing font
+            damage_font = self._create_font(font_size)
 
             damage_surface = damage_font.render(damage_text, True, damage_color)
 
@@ -848,70 +853,229 @@ class BattleEngine:
         except Exception as e:
             logger.error(f"Error loading character sprite: {e}")
             return None
-    
+
+    def _create_font(self, size: int) -> pygame.font.Font:
+        """Create a font with Japanese support at the specified size"""
+        try:
+            if self.japanese_font_path:
+                return pygame.font.Font(self.japanese_font_path, size)
+            else:
+                # Fallback to default font if no Japanese font available
+                return pygame.font.Font(None, size)
+        except Exception as e:
+            logger.warning(f"Failed to create font with size {size}: {e}")
+            return self.font  # Return the default font as fallback
+
     def _show_battle_result(self, battle: Battle, char1: Character, char2: Character, char1_hp: int, char2_hp: int):
         """Show final battle result screen"""
         if not self.screen:
             return
-            
+
         try:
             # Clear any pending events first
             pygame.event.clear()
-            
-            # Draw result overlay
-            overlay = pygame.Surface((Settings.SCREEN_WIDTH, Settings.SCREEN_HEIGHT))
-            overlay.set_alpha(200)
-            overlay.fill((0, 0, 0))
-            self.screen.blit(overlay, (0, 0))
-            
-            # Determine winner
+
+            # Draw gradient background overlay
+            for y in range(Settings.SCREEN_HEIGHT):
+                alpha = int(230 * (y / Settings.SCREEN_HEIGHT))
+                line_surface = pygame.Surface((Settings.SCREEN_WIDTH, 1))
+                line_surface.set_alpha(alpha)
+                line_surface.fill((20, 20, 40))
+                self.screen.blit(line_surface, (0, y))
+
+            # Determine winner and colors
             if battle.winner_id == char1.id:
-                winner_text = f"🏆 {char1.name} の勝利！"
+                winner = char1
+                loser = char2
+                winner_name = char1.name
                 winner_color = (255, 215, 0)  # Gold
+                winner_bg_color = (80, 60, 0)  # Dark gold
             elif battle.winner_id == char2.id:
-                winner_text = f"🏆 {char2.name} の勝利！"
+                winner = char2
+                loser = char1
+                winner_name = char2.name
                 winner_color = (255, 215, 0)  # Gold
+                winner_bg_color = (80, 60, 0)  # Dark gold
             else:
-                winner_text = "⚖️ 引き分け！"
-                winner_color = (192, 192, 192)  # Silver
-            
-            # Draw winner text
-            winner_surface = self.font.render(winner_text, True, winner_color)
-            text_rect = winner_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, Settings.SCREEN_HEIGHT // 2 - 100))
-            self.screen.blit(winner_surface, text_rect)
-            
-            # Draw battle stats
-            stats_text = [
-                f"バトル時間: {battle.duration:.2f}秒",
-                f"総ターン数: {len(battle.turns)}",
-                f"最終HP - {char1.name}: {char1_hp}, {char2.name}: {char2_hp}"
+                winner = None
+                loser = None
+                winner_name = "引き分け"
+                winner_color = (200, 200, 200)  # Silver
+                winner_bg_color = (60, 60, 60)  # Dark gray
+
+            # Draw large "VICTORY" or "DRAW" text at top
+            victory_font = self._create_font(120)
+
+            if winner:
+                victory_text = "VICTORY!"
+                victory_surface = victory_font.render(victory_text, True, winner_color)
+            else:
+                victory_text = "DRAW!"
+                victory_surface = victory_font.render(victory_text, True, winner_color)
+
+            # Draw with glow effect
+            for offset in [(0, 0), (-3, -3), (3, 3), (-3, 3), (3, -3)]:
+                glow_surface = victory_font.render(victory_text, True, winner_bg_color)
+                glow_rect = glow_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2 + offset[0], 80 + offset[1]))
+                self.screen.blit(glow_surface, glow_rect)
+
+            victory_rect = victory_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, 80))
+            self.screen.blit(victory_surface, victory_rect)
+
+            # Draw character images side by side
+            char_display_size = 200
+
+            # Winner character (left side, larger)
+            if winner:
+                winner_sprite = self._load_character_sprite(winner)
+                if winner_sprite:
+                    # Scale to fit
+                    original_w, original_h = winner_sprite.get_size()
+                    scale = min(char_display_size / original_w, char_display_size / original_h)
+                    new_w, new_h = int(original_w * scale * 1.3), int(original_h * scale * 1.3)  # 30% larger for winner
+                    scaled_winner = pygame.transform.scale(winner_sprite, (new_w, new_h))
+
+                    # Draw winner with golden border
+                    winner_pos = (Settings.SCREEN_WIDTH // 2 - 250, Settings.SCREEN_HEIGHT // 2 - 50)
+                    border_rect = pygame.Rect(winner_pos[0] - 10, winner_pos[1] - 10, new_w + 20, new_h + 20)
+                    pygame.draw.rect(self.screen, winner_color, border_rect, 8)
+                    pygame.draw.rect(self.screen, winner_bg_color, border_rect, 4)
+                    self.screen.blit(scaled_winner, winner_pos)
+
+                    # Draw crown symbol above winner (using simple shapes instead of emoji)
+                    crown_center_x = winner_pos[0] + new_w // 2
+                    crown_center_y = winner_pos[1] - 40
+
+                    # Draw crown shape with triangles
+                    crown_points = [
+                        (crown_center_x, crown_center_y - 15),  # Top point
+                        (crown_center_x - 20, crown_center_y),   # Left point
+                        (crown_center_x - 15, crown_center_y + 10), # Left base
+                        (crown_center_x + 15, crown_center_y + 10), # Right base
+                        (crown_center_x + 20, crown_center_y),   # Right point
+                    ]
+                    pygame.draw.polygon(self.screen, winner_color, crown_points)
+                    pygame.draw.polygon(self.screen, winner_bg_color, crown_points, 3)
+
+                    # Crown jewels (circles)
+                    pygame.draw.circle(self.screen, (255, 50, 50), (crown_center_x, crown_center_y - 10), 5)
+                    pygame.draw.circle(self.screen, (50, 255, 50), (crown_center_x - 15, crown_center_y), 4)
+                    pygame.draw.circle(self.screen, (50, 50, 255), (crown_center_x + 15, crown_center_y), 4)
+
+                # Loser character (right side, smaller, dimmed)
+                if loser:
+                    loser_sprite = self._load_character_sprite(loser)
+                    if loser_sprite:
+                        original_w, original_h = loser_sprite.get_size()
+                        scale = min(char_display_size / original_w, char_display_size / original_h)
+                        new_w, new_h = int(original_w * scale * 0.8), int(original_h * scale * 0.8)  # 20% smaller for loser
+                        scaled_loser = pygame.transform.scale(loser_sprite, (new_w, new_h))
+
+                        # Apply gray overlay
+                        gray_overlay = pygame.Surface((new_w, new_h))
+                        gray_overlay.set_alpha(120)
+                        gray_overlay.fill((80, 80, 80))
+                        scaled_loser.blit(gray_overlay, (0, 0))
+
+                        # Draw loser with gray border
+                        loser_pos = (Settings.SCREEN_WIDTH // 2 + 100, Settings.SCREEN_HEIGHT // 2 - 20)
+                        border_rect = pygame.Rect(loser_pos[0] - 5, loser_pos[1] - 5, new_w + 10, new_h + 10)
+                        pygame.draw.rect(self.screen, (100, 100, 100), border_rect, 4)
+                        self.screen.blit(scaled_loser, loser_pos)
+
+            # Draw winner name with large font
+            name_font = self._create_font(72)
+
+            winner_name_surface = name_font.render(winner_name, True, winner_color)
+            # Draw with outline
+            for dx in [-3, 0, 3]:
+                for dy in [-3, 0, 3]:
+                    if dx != 0 or dy != 0:
+                        outline_surface = name_font.render(winner_name, True, (0, 0, 0))
+                        outline_rect = outline_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2 + dx, 180 + dy))
+                        self.screen.blit(outline_surface, outline_rect)
+
+            name_rect = winner_name_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, 180))
+            self.screen.blit(winner_name_surface, name_rect)
+
+            # Draw battle stats with better formatting
+            stats_y = Settings.SCREEN_HEIGHT - 220
+
+            # Stats background panel
+            stats_panel = pygame.Rect(Settings.SCREEN_WIDTH // 2 - 300, stats_y - 20, 600, 140)
+            panel_surface = pygame.Surface((600, 140))
+            panel_surface.set_alpha(180)
+            panel_surface.fill((40, 40, 60))
+            self.screen.blit(panel_surface, (Settings.SCREEN_WIDTH // 2 - 300, stats_y - 20))
+            pygame.draw.rect(self.screen, winner_color, stats_panel, 3)
+
+            stats_font = self._create_font(32)
+
+            # Draw stats with custom icons (no emojis)
+            stats_data = [
+                ("TIME", f"バトル時間: {battle.duration:.2f}秒", (100, 200, 255)),
+                ("TURN", f"総ターン数: {len(battle.turns)}", (255, 200, 100)),
+                ("HP1", f"{char1.name}: {char1_hp} HP", (255, 100, 100)),
+                ("HP2", f"{char2.name}: {char2_hp} HP", (255, 100, 100))
             ]
-            
-            for i, stat in enumerate(stats_text):
-                stat_surface = self.small_font.render(stat, True, (255, 255, 255))
-                stat_rect = stat_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, Settings.SCREEN_HEIGHT // 2 - 20 + i * 30))
+
+            for i, (icon_type, stat_text, icon_color) in enumerate(stats_data):
+                stat_y = stats_y + 10 + i * 30
+
+                # Draw icon on the left
+                icon_x = Settings.SCREEN_WIDTH // 2 - 250
+                if icon_type == "TIME":
+                    # Clock icon
+                    pygame.draw.circle(self.screen, icon_color, (icon_x, stat_y + 8), 12, 2)
+                    pygame.draw.line(self.screen, icon_color, (icon_x, stat_y + 8), (icon_x, stat_y + 2), 2)
+                    pygame.draw.line(self.screen, icon_color, (icon_x, stat_y + 8), (icon_x + 6, stat_y + 8), 2)
+                elif icon_type == "TURN":
+                    # Circular arrow icon
+                    pygame.draw.circle(self.screen, icon_color, (icon_x, stat_y + 8), 10, 2)
+                    pygame.draw.polygon(self.screen, icon_color, [
+                        (icon_x + 8, stat_y + 8),
+                        (icon_x + 12, stat_y + 4),
+                        (icon_x + 12, stat_y + 12)
+                    ])
+                elif icon_type.startswith("HP"):
+                    # Heart icon
+                    pygame.draw.circle(self.screen, icon_color, (icon_x - 4, stat_y + 4), 6)
+                    pygame.draw.circle(self.screen, icon_color, (icon_x + 4, stat_y + 4), 6)
+                    pygame.draw.polygon(self.screen, icon_color, [
+                        (icon_x - 10, stat_y + 4),
+                        (icon_x, stat_y + 14),
+                        (icon_x + 10, stat_y + 4)
+                    ])
+
+                # Draw stat text
+                stat_surface = stats_font.render(stat_text, True, (255, 255, 200))
+                stat_rect = stat_surface.get_rect(left=icon_x + 25, centery=stat_y + 8)
                 self.screen.blit(stat_surface, stat_rect)
             
-            # Draw OK button
-            button_width = 120
-            button_height = 40
+            # Draw OK button with improved styling
+            button_width = 200
+            button_height = 60
             button_x = Settings.SCREEN_WIDTH // 2 - button_width // 2
-            button_y = Settings.SCREEN_HEIGHT // 2 + 100
+            button_y = Settings.SCREEN_HEIGHT - 80
             button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
-            
-            # Button background
-            pygame.draw.rect(self.screen, (70, 130, 180), button_rect)
-            pygame.draw.rect(self.screen, (255, 255, 255), button_rect, 2)
-            
+
+            # Button with gradient effect
+            pygame.draw.rect(self.screen, (100, 180, 100), button_rect)
+            pygame.draw.rect(self.screen, (150, 255, 150), button_rect, 4)
+
             # Button text
-            button_text = self.font.render("OK", True, (255, 255, 255))
+            button_font = self._create_font(48)
+
+            button_text = button_font.render("OK", True, (255, 255, 255))
             button_text_rect = button_text.get_rect(center=button_rect.center)
             self.screen.blit(button_text, button_text_rect)
-            
+
             # Draw instruction text
-            instruction_text = "ESC / スペース / OKボタンで閉じる"
-            instruction_surface = self.small_font.render(instruction_text, True, (200, 200, 200))
-            instruction_rect = instruction_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, button_y + 60))
+            instruction_text = "クリックまたはスペースキーで閉じる"
+            instruction_font = self._create_font(24)
+
+            instruction_surface = instruction_font.render(instruction_text, True, (180, 180, 200))
+            instruction_rect = instruction_surface.get_rect(center=(Settings.SCREEN_WIDTH // 2, button_y - 20))
             self.screen.blit(instruction_surface, instruction_rect)
             
             pygame.display.flip()
