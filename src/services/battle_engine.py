@@ -159,31 +159,34 @@ class BattleEngine:
         """Start a battle between two characters"""
         try:
             logger.info(f"Starting battle: {char1.name} vs {char2.name}")
-            
+
             # Create new battle
             battle = Battle(
                 character1_id=char1.id,
                 character2_id=char2.id
             )
             self.current_battle = battle
-            
+
             # Start battle BGM if visual mode
             if visual_mode:
                 # Try to play battle BGM (will create a simple one if no file exists)
                 self._start_battle_bgm()
-            
+
             # Initialize character HP for battle
             char1_current_hp = char1.hp
             char2_current_hp = char2.hp
-            
+
             # Add battle start log
             battle.add_log_entry(f"🥊 バトル開始！ {char1.name} VS {char2.name}")
             battle.add_log_entry(f"💚 {char1.name} HP: {char1_current_hp} / {char2.name} HP: {char2_current_hp}")
-            
+
             # Initialize display if visual mode
             if visual_mode:
                 if not self.initialize_display():
                     visual_mode = False
+                else:
+                    # Show battle start screen with countdown
+                    self._show_battle_start_screen(char1, char2)
             
             # Battle loop
             start_time = time.time()
@@ -777,6 +780,169 @@ class BattleEngine:
         except Exception as e:
             logger.error(f"Error drawing damage text: {e}")
     
+    def _show_battle_start_screen(self, char1: Character, char2: Character):
+        """Show battle start screen with VS display and countdown"""
+        if not self.screen:
+            return
+
+        try:
+            screen_width = self.screen.get_width()
+            screen_height = self.screen.get_height()
+
+            # Load VS background image
+            vs_bg_path = Path("assets/images/vs.jpg")
+            if vs_bg_path.exists():
+                vs_bg = pygame.image.load(str(vs_bg_path))
+                vs_bg = pygame.transform.scale(vs_bg, (screen_width, screen_height))
+            else:
+                # Fallback: create gradient background
+                vs_bg = pygame.Surface((screen_width, screen_height))
+                for y in range(screen_height):
+                    color_value = int(20 + (y / screen_height) * 60)
+                    pygame.draw.line(vs_bg, (color_value, color_value, color_value + 20), (0, y), (screen_width, y))
+
+            # Calculate positions for character circles
+            circle_radius = int(150)
+            left_circle_x = screen_width // 5  # Move left character more to the left
+            right_circle_x = screen_width * 4 // 5  # Move right character more to the right
+            circle_y = screen_height // 2
+
+            # Load character sprites
+            char1_sprite = self._load_character_sprite(char1)
+            char2_sprite = self._load_character_sprite(char2)
+
+            # Countdown from 3 to 1
+            for count in [3, 2, 1]:
+                # Draw background
+                self.screen.blit(vs_bg, (0, 0))
+
+                # Draw white circles for characters
+                pygame.draw.circle(self.screen, (255, 255, 255), (left_circle_x, circle_y), circle_radius)
+                pygame.draw.circle(self.screen, (255, 255, 255), (right_circle_x, circle_y), circle_radius)
+
+                # Draw character 1 (left)
+                if char1_sprite:
+                    # Scale to fit in circle
+                    char_size = circle_radius * 2 - 40  # Leave some padding
+                    original_w, original_h = char1_sprite.get_size()
+                    scale_factor = min(char_size / original_w, char_size / original_h)
+                    new_w = int(original_w * scale_factor)
+                    new_h = int(original_h * scale_factor)
+                    scaled_char1 = pygame.transform.scale(char1_sprite, (new_w, new_h))
+                    char1_pos = (left_circle_x - new_w // 2, circle_y - new_h // 2)
+                    self.screen.blit(scaled_char1, char1_pos)
+
+                # Draw character 2 (right)
+                if char2_sprite:
+                    # Scale to fit in circle
+                    char_size = circle_radius * 2 - 40
+                    original_w, original_h = char2_sprite.get_size()
+                    scale_factor = min(char_size / original_w, char_size / original_h)
+                    new_w = int(original_w * scale_factor)
+                    new_h = int(original_h * scale_factor)
+                    scaled_char2 = pygame.transform.scale(char2_sprite, (new_w, new_h))
+                    char2_pos = (right_circle_x - new_w // 2, circle_y - new_h // 2)
+                    self.screen.blit(scaled_char2, char2_pos)
+
+                # Draw character names below circles
+                name_font = self._create_font(36)
+                name1_surface = name_font.render(char1.name, True, (255, 255, 255))
+                name2_surface = name_font.render(char2.name, True, (255, 255, 255))
+                name1_rect = name1_surface.get_rect(center=(left_circle_x, circle_y + circle_radius + 40))
+                name2_rect = name2_surface.get_rect(center=(right_circle_x, circle_y + circle_radius + 40))
+
+                # Draw with outline
+                for dx in [-2, 0, 2]:
+                    for dy in [-2, 0, 2]:
+                        if dx != 0 or dy != 0:
+                            outline1 = name_font.render(char1.name, True, (0, 0, 0))
+                            outline2 = name_font.render(char2.name, True, (0, 0, 0))
+                            self.screen.blit(outline1, (name1_rect.x + dx, name1_rect.y + dy))
+                            self.screen.blit(outline2, (name2_rect.x + dx, name2_rect.y + dy))
+
+                self.screen.blit(name1_surface, name1_rect)
+                self.screen.blit(name2_surface, name2_rect)
+
+                # Draw countdown number in upper center
+                countdown_font = self._create_font(180)
+                countdown_text = countdown_font.render(str(count), True, (255, 255, 0))
+                countdown_rect = countdown_text.get_rect(center=(screen_width // 2, screen_height // 4))
+
+                # Draw with thick outline
+                for dx in [-4, 0, 4]:
+                    for dy in [-4, 0, 4]:
+                        if dx != 0 or dy != 0:
+                            outline = countdown_font.render(str(count), True, (0, 0, 0))
+                            self.screen.blit(outline, (countdown_rect.x + dx, countdown_rect.y + dy))
+
+                self.screen.blit(countdown_text, countdown_rect)
+
+                pygame.display.flip()
+                pygame.time.wait(1000)  # Wait 1 second
+
+            # Final "FIGHT!" display
+            self.screen.blit(vs_bg, (0, 0))
+
+            # Draw circles and characters one more time
+            pygame.draw.circle(self.screen, (255, 255, 255), (left_circle_x, circle_y), circle_radius)
+            pygame.draw.circle(self.screen, (255, 255, 255), (right_circle_x, circle_y), circle_radius)
+
+            if char1_sprite:
+                char_size = circle_radius * 2 - 40
+                original_w, original_h = char1_sprite.get_size()
+                scale_factor = min(char_size / original_w, char_size / original_h)
+                new_w = int(original_w * scale_factor)
+                new_h = int(original_h * scale_factor)
+                scaled_char1 = pygame.transform.scale(char1_sprite, (new_w, new_h))
+                char1_pos = (left_circle_x - new_w // 2, circle_y - new_h // 2)
+                self.screen.blit(scaled_char1, char1_pos)
+
+            if char2_sprite:
+                char_size = circle_radius * 2 - 40
+                original_w, original_h = char2_sprite.get_size()
+                scale_factor = min(char_size / original_w, char_size / original_h)
+                new_w = int(original_w * scale_factor)
+                new_h = int(original_h * scale_factor)
+                scaled_char2 = pygame.transform.scale(char2_sprite, (new_w, new_h))
+                char2_pos = (right_circle_x - new_w // 2, circle_y - new_h // 2)
+                self.screen.blit(scaled_char2, char2_pos)
+
+            # Draw names
+            name1_surface = name_font.render(char1.name, True, (255, 255, 255))
+            name2_surface = name_font.render(char2.name, True, (255, 255, 255))
+            name1_rect = name1_surface.get_rect(center=(left_circle_x, circle_y + circle_radius + 40))
+            name2_rect = name2_surface.get_rect(center=(right_circle_x, circle_y + circle_radius + 40))
+
+            for dx in [-2, 0, 2]:
+                for dy in [-2, 0, 2]:
+                    if dx != 0 or dy != 0:
+                        outline1 = name_font.render(char1.name, True, (0, 0, 0))
+                        outline2 = name_font.render(char2.name, True, (0, 0, 0))
+                        self.screen.blit(outline1, (name1_rect.x + dx, name1_rect.y + dy))
+                        self.screen.blit(outline2, (name2_rect.x + dx, name2_rect.y + dy))
+
+            self.screen.blit(name1_surface, name1_rect)
+            self.screen.blit(name2_surface, name2_rect)
+
+            # Draw "FIGHT!" text in upper center
+            fight_font = self._create_font(120)
+            fight_text = fight_font.render("FIGHT!", True, (255, 100, 100))
+            fight_rect = fight_text.get_rect(center=(screen_width // 2, screen_height // 4))
+
+            for dx in [-4, 0, 4]:
+                for dy in [-4, 0, 4]:
+                    if dx != 0 or dy != 0:
+                        outline = fight_font.render("FIGHT!", True, (0, 0, 0))
+                        self.screen.blit(outline, (fight_rect.x + dx, fight_rect.y + dy))
+
+            self.screen.blit(fight_text, fight_rect)
+
+            pygame.display.flip()
+            pygame.time.wait(1000)  # Show FIGHT! for 1 second
+
+        except Exception as e:
+            logger.error(f"Error showing battle start screen: {e}")
+
     def _start_battle_bgm(self):
         """Start battle background music"""
         try:

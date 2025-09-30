@@ -272,7 +272,8 @@ OekakiBattler/
 ├── server_up.sh            # サーバー起動スクリプト
 ├── assets/                 # アセットファイル
 │   ├── images/            # 画像ファイル
-│   │   └── battle_arena.png    # バトル背景画像
+│   │   ├── battle_arena.png    # バトル背景画像
+│   │   └── vs.jpg              # バトル開始画面背景
 │   └── sounds/            # サウンドファイル
 ├── data/                   # データファイル
 │   ├── characters/         # 元画像
