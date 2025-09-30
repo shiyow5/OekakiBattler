@@ -76,7 +76,7 @@ class BattleEffects:
             vx = math.cos(angle) * speed
             vy = math.sin(angle) * speed
             life = random.uniform(25, 50)
-            size = random.uniform(4, 10)
+            size = random.uniform(8, 20)  # Increased from 4-10 to 8-20
 
             # Color variation
             r = max(0, min(255, color[0] + random.randint(-30, 30)))
@@ -109,7 +109,7 @@ class BattleEffects:
             vx = random.uniform(-2, 2)
             vy = random.uniform(-2, 2)
             life = random.uniform(15, 30)
-            size = random.uniform(5, 12)
+            size = random.uniform(10, 24)  # Increased from 5-12 to 10-24
 
             self.add_particle(px, py, vx, vy, life, color, size, gravity=0.1)
 
@@ -130,7 +130,7 @@ class BattleEffects:
                 (150, 150, 255)
             ]
             color = random.choice(colors)
-            size = random.uniform(4, 9)
+            size = random.uniform(8, 18)  # Increased from 4-9 to 8-18
 
             self.add_particle(x, y, vx, vy, life, color, size, gravity=-0.1)
 
@@ -148,7 +148,7 @@ class BattleEffects:
 
             life = random.uniform(20, 40)
             color = (255, random.randint(50, 150), random.randint(50, 150))
-            size = random.uniform(4, 9)
+            size = random.uniform(8, 18)  # Increased from 4-9 to 8-18
 
             self.add_particle(x, y, vx, vy, life, color, size)
 
@@ -167,7 +167,7 @@ class BattleEffects:
 
             life = random.uniform(25, 45)
             color = (255, 255, random.randint(100, 255))
-            size = random.uniform(4, 8)
+            size = random.uniform(8, 16)  # Increased from 4-8 to 8-16
 
             self.add_particle(start_x, start_y, vx, vy, life, color, size, gravity=0)
 

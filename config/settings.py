@@ -11,7 +11,7 @@ class Settings:
     MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.5-flash-lite-preview-06-17")
     
     # Image Processing
-    TARGET_IMAGE_SIZE = (300, 300)
+    MAX_IMAGE_SIZE = 600  # Maximum width or height while preserving aspect ratio
     SUPPORTED_FORMATS = [".png", ".jpg", ".jpeg", ".bmp"]
     MIN_RESOLUTION = (100, 100)
     

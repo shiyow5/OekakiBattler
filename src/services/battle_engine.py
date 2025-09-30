@@ -37,6 +37,7 @@ class BattleEngine:
         self.small_font = None
         self.japanese_font_path = None  # Store the path to the Japanese font
         self.battle_sprites = {}
+        self.background_image = None  # Battle arena background image
 
         # Effect systems
         self.effects = None
@@ -144,6 +145,9 @@ class BattleEngine:
             # Initialize effect systems
             self.effects = BattleEffects(self.screen)
             self.animator = CharacterAnimator()
+
+            # Load background image
+            self._load_background_image()
 
             logger.info("Battle display initialized successfully")
             return True
@@ -592,15 +596,26 @@ class BattleEngine:
 
             # Clear screen with shake offset
             shake_offset = self.effects.screen_offset if self.effects else [0, 0]
-            self.screen.fill((240, 248, 255))
 
-            # Draw battle arena (taller)
+            # Draw background image or solid color
+            if self.background_image:
+                # Scale background image to screen size
+                screen_bg = pygame.transform.scale(self.background_image, (screen_width, screen_height))
+                self.screen.blit(screen_bg, (shake_offset[0], shake_offset[1]))
+            else:
+                # Fallback to solid color background
+                self.screen.fill((240, 248, 255))
+
+            # Draw battle arena (taller) - white background
             arena_x = int(50 * scale_x) + shake_offset[0]
             arena_y = int(50 * scale_y) + shake_offset[1]
             arena_width = screen_width - int(100 * scale_x)
             arena_height = int(550 * scale_y)  # Increased from 400 to 550
             arena_rect = pygame.Rect(arena_x, arena_y, arena_width, arena_height)
-            pygame.draw.rect(self.screen, (200, 220, 200), arena_rect)
+
+            # Arena interior is always white
+            pygame.draw.rect(self.screen, (255, 255, 255), arena_rect)
+            # Draw arena border
             pygame.draw.rect(self.screen, (100, 100, 100), arena_rect, int(3 * scale))
 
             # Character positions with animation offsets (adjusted for taller arena)
@@ -798,18 +813,7 @@ class BattleEngine:
                 char_x = position[0] - new_width // 2
                 char_y = position[1] - new_height // 2
 
-                # Apply HP-based effects
-                hp_ratio = max(0, current_hp / character.hp)
-
-                if hp_ratio < 0.5:  # Apply red tint when HP is low
-                    # Create a red overlay with simpler blending
-                    red_overlay = pygame.Surface((new_width, new_height))
-                    alpha = int(60 * (1 - hp_ratio * 2))  # More red as HP decreases
-                    red_overlay.set_alpha(alpha)
-                    red_overlay.fill((255, 80, 80))  # Red damage indicator
-                    scaled_sprite.blit(red_overlay, (0, 0))
-
-                # Draw the character image
+                # Draw the character image (no HP-based color effects)
                 self.screen.blit(scaled_sprite, (char_x, char_y))
             else:
                 # Fallback to colored rectangle
@@ -832,6 +836,21 @@ class BattleEngine:
             pygame.draw.rect(self.screen, (128, 128, 128), char_rect)
             pygame.draw.rect(self.screen, (0, 0, 0), char_rect, max(1, int(2 * display_scale)))
     
+    def _load_background_image(self):
+        """Load battle arena background image"""
+        try:
+            background_path = Path("assets/images/battle_arena.png")
+
+            if background_path.exists():
+                self.background_image = pygame.image.load(str(background_path))
+                logger.info(f"Loaded background image from {background_path}")
+            else:
+                logger.warning(f"Background image not found at {background_path}, using default background")
+                self.background_image = None
+        except Exception as e:
+            logger.error(f"Error loading background image: {e}")
+            self.background_image = None
+
     def _load_character_sprite(self, character: Character) -> Optional[pygame.Surface]:
         """Load character sprite with caching"""
         try:

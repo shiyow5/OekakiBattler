@@ -1,5 +1,330 @@
 # 変更履歴 (CHANGES.md)
 
+## 2025-09-30 (修正20): HP低下時の赤色エフェクトを削除
+
+### 変更内容
+HP半分以下で表示されていたキャラクターの赤色オーバーレイエフェクトを削除しました。
+
+**修正ファイル:**
+- `src/services/battle_engine.py`
+
+**削除したコード:**
+```python
+# 旧: HP半分以下で赤色オーバーレイを適用
+hp_ratio = max(0, current_hp / character.hp)
+
+if hp_ratio < 0.5:  # Apply red tint when HP is low
+    red_overlay = pygame.Surface((new_width, new_height))
+    alpha = int(60 * (1 - hp_ratio * 2))  # More red as HP decreases
+    red_overlay.set_alpha(alpha)
+    red_overlay.fill((255, 80, 80))  # Red damage indicator
+    scaled_sprite.blit(red_overlay, (0, 0))
+
+# 新: エフェクトなし、常に元の色で表示
+# (コード削除)
+```
+
+**変更点:**
+- `_draw_character()`メソッドからHP比率に基づく赤色オーバーレイ処理を削除
+- キャラクタースプライトは常に元の色で表示されるように変更
+
+**効果:**
+- ✅ キャラクターの見た目が常にクリア
+- ✅ 元のキャラクターデザインが保たれる
+- ✅ HP状態はHPバーで十分確認できる
+- ✅ 視覚的にシンプルで見やすい
+
+**注意:**
+- フォールバック表示（画像がない場合の矩形表示）は引き続きHP比率で色が変化します
+- HPバーの色と数値でHP状態を確認可能
+
+---
+
+## 2025-09-30 (修正19): パーティクルサイズのさらなる拡大
+
+### 変更内容
+攻撃エフェクトのパーティクルサイズをさらに大きくして、より迫力のある演出にしました。
+
+**修正ファイル:**
+- `src/services/battle_effects.py`
+
+**パーティクルサイズの変更:**
+
+| エフェクト種類 | 旧サイズ範囲 | 新サイズ範囲 | 倍率 |
+|------------|------------|------------|------|
+| 爆発 (explosion) | 4-10 | 8-20 | 2倍 |
+| 斬撃軌跡 (slash_trail) | 5-12 | 10-24 | 2倍 |
+| 魔法パーティクル (magic) | 4-9 | 8-18 | 2倍 |
+| 衝撃パーティクル (impact) | 4-9 | 8-18 | 2倍 |
+| チャージエフェクト (charge) | 4-8 | 8-16 | 2倍 |
+
+**変更箇所:**
+```python
+# 爆発エフェクト
+size = random.uniform(8, 20)  # 旧: 4-10
+
+# 斬撃軌跡
+size = random.uniform(10, 24)  # 旧: 5-12
+
+# 魔法パーティクル
+size = random.uniform(8, 18)  # 旧: 4-9
+
+# 衝撃パーティクル
+size = random.uniform(8, 18)  # 旧: 4-9
+
+# チャージエフェクト
+size = random.uniform(8, 16)  # 旧: 4-8
+```
+
+**効果:**
+- ✅ パーティクルが約2倍の大きさになり、より見やすい
+- ✅ 攻撃の迫力が大幅に向上
+- ✅ 遠くからでも明確にエフェクトを視認可能
+- ✅ バトルの臨場感が増加
+- ✅ 華やかで派手な演出に
+
+**視覚的効果:**
+- 爆発がより大規模に見える
+- 斬撃の軌跡がはっきりと見える
+- 魔法攻撃の魔法陣が豪華に
+- 衝撃の飛沫が力強く
+- チャージエフェクトが目立つ
+
+---
+
+## 2025-09-30 (修正18): 画像のアスペクト比を保持
+
+### 問題
+画像処理時に、元の画像を強制的に正方形（300x300）にリサイズしていたため、縦長や横長の画像が歪んでしまっていた。
+
+### 解決策
+**修正ファイル:**
+- `config/settings.py`
+- `src/services/image_processor.py`
+
+**変更点:**
+
+1. **設定の変更**
+```python
+# 旧: 固定サイズ
+TARGET_IMAGE_SIZE = (300, 300)
+
+# 新: 最大サイズ
+MAX_IMAGE_SIZE = 600  # 幅または高さの最大値
+```
+
+2. **リサイズロジックの変更**
+```python
+# 元の画像サイズを取得
+height, width = rgb_image.shape[:2]
+
+# アスペクト比を保持してリサイズ
+if width > height:
+    # 横長の画像
+    if width > max_size:
+        new_width = max_size
+        new_height = int(height * (max_size / width))
+else:
+    # 縦長の画像
+    if height > max_size:
+        new_height = max_size
+        new_width = int(width * (max_size / height))
+
+# 計算されたサイズでリサイズ
+image_resized = cv2.resize(rgb_image, (new_width, new_height), ...)
+```
+
+**処理例:**
+
+| 元のサイズ | 処理後のサイズ | アスペクト比 |
+|----------|--------------|------------|
+| 800×600 | 600×450 | 4:3 (保持) |
+| 400×800 | 300×600 | 1:2 (保持) |
+| 1200×400 | 600×200 | 3:1 (保持) |
+| 500×500 | 500×500 | 1:1 (リサイズ不要) |
+
+**効果:**
+- ✅ 画像の歪みがなくなる
+- ✅ 元のアスペクト比が保持される
+- ✅ 縦長・横長の画像が正しく表示される
+- ✅ ファイルサイズの無駄な増加を防ぐ
+- ✅ キャラクターの見た目が保たれる
+
+**処理フロー:**
+```
+入力画像 (任意のサイズ・比率)
+    ↓
+アスペクト比を計算
+    ↓
+長辺が600px以下になるようにリサイズ
+    ↓
+アスペクト比を保持した画像
+```
+
+---
+
+## 2025-09-30 (修正17): 背景削除後の透過保存の修正
+
+### 問題
+背景削除機能で画像の背景を削除しても、保存時に透過PNG形式で保存されていなかった。
+
+### 原因
+`preprocess_image()`メソッドで、RGBA画像（透過あり）を白背景のRGB画像（透過なし）に変換していた。
+
+### 解決策
+**修正ファイル:**
+- `src/services/image_processor.py`
+
+**変更点:**
+
+1. **`preprocess_image()`メソッドの修正**
+```python
+# 旧: RGBA画像を白背景のRGBに変換
+if image.shape[2] == 4:
+    rgb_image = np.ones((image.shape[0], image.shape[1], 3), dtype=np.uint8) * 255
+    alpha = image[:, :, 3] / 255.0
+    for c in range(3):
+        rgb_image[:, :, c] = (1 - alpha) * 255 + alpha * image[:, :, c]
+    image = rgb_image
+
+# 新: アルファチャンネルを保持
+has_alpha = image.shape[2] == 4
+if has_alpha:
+    alpha_channel = image[:, :, 3]
+    rgb_image = image[:, :, :3]
+else:
+    rgb_image = image
+
+# RGB部分を処理
+image_resized = cv2.resize(rgb_image, self.target_size, ...)
+# アルファチャンネルも同様にリサイズ
+if has_alpha:
+    alpha_resized = cv2.resize(alpha_channel, self.target_size, ...)
+
+# 処理後にアルファチャンネルを復元
+if has_alpha:
+    image_enhanced = np.dstack([image_enhanced, alpha_resized])
+```
+
+2. **`save_sprite()`メソッドの改善**
+```python
+# 明示的なRGBA保存とログ追加
+if len(sprite.shape) == 3 and sprite.shape[2] == 4:  # RGBA
+    pil_image = Image.fromarray(sprite, 'RGBA')
+    logger.info(f"Saving sprite with transparency (RGBA)")
+else:  # RGB
+    pil_image = Image.fromarray(sprite, 'RGB')
+    logger.info(f"Saving sprite without transparency (RGB)")
+
+# PNG形式で最適化付き保存
+pil_image.save(output_path_png, 'PNG', optimize=True)
+```
+
+**処理フロー:**
+```
+1. extract_character() → RGBA画像生成（透過あり）
+2. preprocess_image() → RGBA画像を保持したまま処理
+   - RGBチャンネル: リサイズ、コントラスト強化、線画強調
+   - アルファチャンネル: リサイズのみ
+   - 最後にRGBA再結合
+3. save_sprite() → RGBA画像として透過PNG保存
+```
+
+**効果:**
+- ✅ 背景削除後の画像が透過PNG形式で保存される
+- ✅ バトル画面でキャラクターの背景が透明になる
+- ✅ 画質の劣化なく透過を保持
+- ✅ 処理内容がログで確認可能
+
+---
+
+## 2025-09-30 (修正16): バトル画面背景画像のサポート追加
+
+### 変更内容
+バトル画面の外側背景を画像ファイルで設定できる機能を追加しました。アリーナ内部は白色で統一されます。
+
+**修正ファイル:**
+- `src/services/battle_engine.py`
+
+**変更点:**
+
+1. **背景画像の管理**
+```python
+# __init__() に追加
+self.background_image = None  # Battle arena background image
+```
+
+2. **画像読み込みメソッドの追加**
+```python
+def _load_background_image(self):
+    """Load battle arena background image"""
+    background_path = Path("assets/images/battle_arena.png")
+    if background_path.exists():
+        self.background_image = pygame.image.load(str(background_path))
+```
+
+3. **初期化時の画像読み込み**
+```python
+# initialize_display() に追加
+self._load_background_image()
+```
+
+4. **背景描画の変更**
+```python
+# _render_battle_frame() の変更
+
+# 画面全体に背景画像または単色を描画
+if self.background_image:
+    # 画面サイズに合わせてスケーリング
+    screen_bg = pygame.transform.scale(self.background_image, (screen_width, screen_height))
+    self.screen.blit(screen_bg, (shake_offset[0], shake_offset[1]))
+else:
+    # フォールバック: 水色背景
+    self.screen.fill((240, 248, 255))
+
+# アリーナの枠を定義
+arena_rect = pygame.Rect(arena_x, arena_y, arena_width, arena_height)
+
+# アリーナ内部は常に白色
+pygame.draw.rect(self.screen, (255, 255, 255), arena_rect)
+# アリーナの枠線を描画
+pygame.draw.rect(self.screen, (100, 100, 100), arena_rect, int(3 * scale))
+```
+
+**機能:**
+- ✅ `assets/images/battle_arena.png` に画像を配置すると自動読み込み
+- ✅ 画面サイズに自動的にスケーリング
+- ✅ 画面揺れエフェクトにも対応
+- ✅ アリーナ内部は常に白色で統一
+- ✅ 画像がない場合は従来の水色背景を表示
+- ✅ エラーハンドリングで安全な動作
+
+**推奨画像:**
+- 解像度: 1024×768ピクセル（または画面比率に応じたサイズ）
+- フォーマット: PNG（透過対応）、JPG
+- パス: `assets/images/battle_arena.png`
+
+**レイアウト:**
+```
+┌─────────────────────────────────┐
+│  背景画像（または水色背景）       │
+│  ┌─────────────────────────┐   │
+│  │ アリーナ（グレー枠）     │   │
+│  │  内部は常に白色          │   │
+│  │  キャラクター表示        │   │
+│  └─────────────────────────┘   │
+│  バトルログ表示                  │
+└─────────────────────────────────┘
+```
+
+**効果:**
+- 画面全体の雰囲気を自由にカスタマイズ可能
+- 画像を変えるだけで簡単に変更できる
+- ゲームの世界観を強化
+- アリーナ内部は白色で統一され、キャラクターが見やすい
+
+---
+
 ## 2025-09-30 (修正15): 画面サイズに応じた自動スケーリング対応
 
 ### 問題

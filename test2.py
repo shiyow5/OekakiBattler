@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-input_path = './data/characters/S__14188554.jpg'
+input_path = './data/characters/S__14188553.jpg'
 output_path = './shiba-inu-remove.png'
 
 # 画像の読み込み
