@@ -196,30 +196,66 @@ class AudioManager:
                 pass
     
     def create_default_sounds(self):
-        """Create simple default sounds programmatically"""
+        """Load or create default sound effects"""
         if not self.enabled:
             return
-            
+
+        # Define sound definitions with possible file names
+        sound_defs = {
+            "attack": {
+                "files": ["attack.wav", "attack.ogg", "attack.mp3"],
+                "frequency": 800,
+                "duration": 0.1
+            },
+            "critical": {
+                "files": ["critical.wav", "critical.ogg", "critical.mp3"],
+                "frequency": 1200,
+                "duration": 0.15
+            },
+            "magic": {
+                "files": ["magic.wav", "magic.ogg", "magic.mp3"],
+                "frequency": 600,
+                "duration": 0.2,
+                "warble": True
+            },
+            "miss": {
+                "files": ["miss.wav", "miss.ogg", "miss.mp3"],
+                "frequency": 400,
+                "duration": 0.1,
+                "descending": True
+            },
+            "victory": {
+                "files": ["victory.wav", "victory.ogg", "victory.mp3"],
+                "frequency": 800,
+                "duration": 0.5,
+                "melody": True
+            }
+        }
+
         try:
-            # Create simple sound effects using pygame
-            
-            # Attack sound (short beep)
-            self._create_simple_sound("attack", frequency=800, duration=0.1)
-            
-            # Critical hit sound (higher pitched)
-            self._create_simple_sound("critical", frequency=1200, duration=0.15)
-            
-            # Magic sound (warbling tone)
-            self._create_simple_sound("magic", frequency=600, duration=0.2, warble=True)
-            
-            # Miss sound (descending tone)
-            self._create_simple_sound("miss", frequency=400, duration=0.1, descending=True)
-            
-            # Victory sound (ascending melody)
-            self._create_simple_sound("victory", frequency=800, duration=0.5, melody=True)
-            
-            logger.info("Created default sound effects")
-            
+            for name, config in sound_defs.items():
+                # Try to load from file first
+                loaded = False
+                for filename in config["files"]:
+                    if self.load_sound(name, filename):
+                        loaded = True
+                        logger.info(f"Loaded sound '{name}' from file: {filename}")
+                        break
+
+                # If no file found, create programmatically
+                if not loaded:
+                    logger.debug(f"No file found for '{name}', creating programmatically")
+                    self._create_simple_sound(
+                        name,
+                        frequency=config["frequency"],
+                        duration=config["duration"],
+                        warble=config.get("warble", False),
+                        descending=config.get("descending", False),
+                        melody=config.get("melody", False)
+                    )
+
+            logger.info("Sound effects initialized")
+
         except Exception as e:
             logger.warning(f"Failed to create default sounds: {e}")
     

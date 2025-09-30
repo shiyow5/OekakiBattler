@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Tuple, List, Optional
 from src.models import Character, Battle, BattleTurn, BattleResult
 from src.services.audio_manager import audio_manager
+from src.services.battle_effects import BattleEffects, CharacterAnimator
 from config.settings import Settings
 
 logging.basicConfig(level=logging.INFO)
@@ -35,6 +36,10 @@ class BattleEngine:
         self.font = None
         self.small_font = None
         self.battle_sprites = {}
+
+        # Effect systems
+        self.effects = None
+        self.animator = None
         
     def initialize_display(self) -> bool:
         """Initialize Pygame display for battle visualization"""
@@ -127,7 +132,11 @@ class BattleEngine:
                 except Exception as e:
                     logger.error(f"Error loading small font: {e}")
                     self.small_font = pygame.font.Font(None, 24)
-            
+
+            # Initialize effect systems
+            self.effects = BattleEffects(self.screen)
+            self.animator = CharacterAnimator()
+
             logger.info("Battle display initialized successfully")
             return True
         except Exception as e:
@@ -202,8 +211,9 @@ class BattleEngine:
                     
                     # Visual update
                     if visual_mode and self.screen:
+                        self._animate_turn(char1, char2, turn, char1_current_hp, char2_current_hp)
                         self._update_battle_display(char1, char2, char1_current_hp, char2_current_hp, turn, battle.battle_log[-5:])
-                        time.sleep(1.0 * self.battle_speed)
+                        time.sleep(0.5 * self.battle_speed)
                     
                     # Check if battle should end
                     if char1_current_hp <= 0 or char2_current_hp <= 0:
@@ -410,11 +420,213 @@ class BattleEngine:
             logger.error(f"Error creating turn log: {e}")
             return f"{attacker.name} attacks {defender.name}"
     
+    def _animate_turn(self, char1: Character, char2: Character, turn: BattleTurn, char1_hp: int, char2_hp: int):
+        """Animate a battle turn with smooth effects"""
+        if not self.screen or not self.effects or not self.animator:
+            return
+
+        try:
+            # Get recent battle logs
+            recent_logs = self.current_battle.battle_log[-5:] if self.current_battle else []
+
+            # Determine attacker and defender
+            if turn.attacker_id == char1.id:
+                attacker, defender = char1, char2
+                attacker_pos = (200, 300)
+                defender_pos = (Settings.SCREEN_WIDTH - 200, 300)
+            else:
+                attacker, defender = char2, char1
+                attacker_pos = (Settings.SCREEN_WIDTH - 200, 300)
+                defender_pos = (200, 300)
+
+            # Phase 1: Pre-attack animation (jump/charge)
+            self.animator.start_animation(attacker.id, 'bounce', 20, bounces=3, height=20)
+
+            for _ in range(20):
+                self._render_battle_frame(char1, char2, char1_hp, char2_hp, turn, recent_logs)
+                self.clock.tick(60)
+
+            # Phase 2: Attack animation
+            if not turn.is_miss:
+                # Create attack direction
+                direction = (
+                    defender_pos[0] - attacker_pos[0],
+                    defender_pos[1] - attacker_pos[1]
+                )
+                length = math.sqrt(direction[0]**2 + direction[1]**2)
+                if length > 0:
+                    direction = (direction[0]/length, direction[1]/length)
+
+                if turn.action_type == "magic":
+                    # Magic attack animation
+                    self.effects.create_charge_effect(attacker_pos[0], attacker_pos[1], 15)
+                    for _ in range(15):
+                        self._render_battle_frame(char1, char2, char1_hp, char2_hp, turn, recent_logs)
+                        self.clock.tick(60)
+
+                    self.effects.create_magic_particles(defender_pos[0], defender_pos[1], 30)
+                    if turn.is_critical:
+                        self.effects.screen_shake(15, 10)
+                        self.effects.create_explosion(defender_pos[0], defender_pos[1], 40, (200, 100, 255))
+                        audio_manager.play_sound("magic", 1.2)
+                        audio_manager.play_sound("critical")
+                    else:
+                        self.effects.screen_shake(8, 8)
+                        audio_manager.play_sound("magic", 1.0)
+
+                else:
+                    # Physical attack animation
+                    self.effects.create_slash_trail(attacker_pos, defender_pos)
+                    self.effects.create_impact_particles(
+                        defender_pos[0], defender_pos[1],
+                        direction, 15
+                    )
+
+                    if turn.is_critical:
+                        self.effects.screen_shake(12, 10)
+                        self.effects.create_explosion(defender_pos[0], defender_pos[1], 30, (255, 200, 0))
+                        audio_manager.play_sound("critical")
+                    else:
+                        self.effects.screen_shake(6, 6)
+                        audio_manager.play_sound("attack")
+
+                # Defender reaction animation
+                self.animator.start_animation(defender.id, 'shake', 10, intensity=8)
+
+            else:
+                # Miss animation
+                self.animator.start_animation(defender.id, 'jump', 15, height=25)
+                audio_manager.play_sound("miss")
+
+            # Phase 3: Impact and recovery
+            for _ in range(30):
+                self._render_battle_frame(char1, char2, char1_hp, char2_hp, turn, recent_logs)
+                self.clock.tick(60)
+
+        except Exception as e:
+            logger.error(f"Error animating turn: {e}")
+
+    def _render_battle_frame(self, char1: Character, char2: Character, char1_hp: int, char2_hp: int, current_turn: BattleTurn, recent_logs: List[str]):
+        """Render a single battle frame with all effects"""
+        if not self.screen:
+            return
+
+        try:
+            # Update effect systems
+            if self.effects:
+                self.effects.update(1.0)
+            if self.animator:
+                self.animator.update(1.0)
+
+            # Clear screen with shake offset
+            shake_offset = self.effects.screen_offset if self.effects else [0, 0]
+            self.screen.fill((240, 248, 255))
+
+            # Draw battle arena
+            arena_rect = pygame.Rect(
+                50 + shake_offset[0],
+                100 + shake_offset[1],
+                Settings.SCREEN_WIDTH - 100,
+                400
+            )
+            pygame.draw.rect(self.screen, (200, 220, 200), arena_rect)
+            pygame.draw.rect(self.screen, (100, 100, 100), arena_rect, 3)
+
+            # Character positions with animation offsets
+            char1_base_pos = (200, 300)
+            char2_base_pos = (Settings.SCREEN_WIDTH - 200, 300)
+
+            char1_offset = self.animator.get_offset(char1.id) if self.animator else (0, 0)
+            char2_offset = self.animator.get_offset(char2.id) if self.animator else (0, 0)
+
+            char1_pos = (
+                char1_base_pos[0] + int(char1_offset[0]) + shake_offset[0],
+                char1_base_pos[1] + int(char1_offset[1]) + shake_offset[1]
+            )
+            char2_pos = (
+                char2_base_pos[0] + int(char2_offset[0]) + shake_offset[0],
+                char2_base_pos[1] + int(char2_offset[1]) + shake_offset[1]
+            )
+
+            # Draw characters
+            self._draw_character(char1, char1_pos, char1_hp)
+            self._draw_character(char2, char2_pos, char2_hp)
+
+            # Draw HP bars
+            self._draw_hp_bars(char1, char2, char1_pos, char2_pos, char1_hp, char2_hp, shake_offset)
+
+            # Draw character names
+            name1_surface = self.font.render(char1.name, True, (0, 0, 0))
+            name2_surface = self.font.render(char2.name, True, (0, 0, 0))
+            self.screen.blit(name1_surface, (char1_pos[0] - 40, char1_pos[1] + 70))
+            self.screen.blit(name2_surface, (char2_pos[0] - 40, char2_pos[1] + 70))
+
+            # Draw effects
+            if self.effects:
+                self.effects.draw()
+
+            # Draw damage text
+            if current_turn and not current_turn.is_miss and current_turn.damage > 0:
+                defender_pos = char2_pos if current_turn.attacker_id == char1.id else char1_pos
+                self._draw_damage_text(current_turn, defender_pos)
+
+            # Draw recent battle log
+            if recent_logs:
+                log_start_y = 520
+                for i, log_entry in enumerate(recent_logs):
+                    log_surface = self.small_font.render(log_entry, True, (0, 0, 0))
+                    self.screen.blit(log_surface, (50, log_start_y + i * 25))
+
+            # Update display
+            pygame.display.flip()
+
+        except Exception as e:
+            logger.error(f"Error rendering battle frame: {e}")
+
+    def _draw_hp_bars(self, char1: Character, char2: Character, char1_pos: Tuple[int, int], char2_pos: Tuple[int, int], char1_hp: int, char2_hp: int, shake_offset: List[int]):
+        """Draw HP bars for both characters"""
+        try:
+            hp_bar_width = 100
+            hp_bar_height = 20
+
+            # Calculate HP ratios
+            char1_hp_ratio = max(0, char1_hp / char1.hp)
+            char2_hp_ratio = max(0, char2_hp / char2.hp)
+
+            # Character 1 HP bar
+            hp1_bar_rect = pygame.Rect(char1_pos[0] - 50, char1_pos[1] - 80, hp_bar_width, hp_bar_height)
+            hp1_fill_width = int(hp_bar_width * char1_hp_ratio)
+            hp1_fill_rect = pygame.Rect(char1_pos[0] - 50, char1_pos[1] - 80, hp1_fill_width, hp_bar_height)
+
+            pygame.draw.rect(self.screen, (255, 255, 255), hp1_bar_rect)
+            pygame.draw.rect(self.screen, (0, 255, 0), hp1_fill_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, 2)
+
+            # Character 2 HP bar
+            hp2_bar_rect = pygame.Rect(char2_pos[0] - 50, char2_pos[1] - 80, hp_bar_width, hp_bar_height)
+            hp2_fill_width = int(hp_bar_width * char2_hp_ratio)
+            hp2_fill_rect = pygame.Rect(char2_pos[0] - 50, char2_pos[1] - 80, hp2_fill_width, hp_bar_height)
+
+            pygame.draw.rect(self.screen, (255, 255, 255), hp2_bar_rect)
+            pygame.draw.rect(self.screen, (0, 255, 0), hp2_fill_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, 2)
+
+            # Draw HP text
+            hp1_text = f"HP: {char1_hp}/{char1.hp}"
+            hp2_text = f"HP: {char2_hp}/{char2.hp}"
+            hp1_surface = self.small_font.render(hp1_text, True, (0, 0, 0))
+            hp2_surface = self.small_font.render(hp2_text, True, (0, 0, 0))
+            self.screen.blit(hp1_surface, (char1_pos[0] - 50, char1_pos[1] - 100))
+            self.screen.blit(hp2_surface, (char2_pos[0] - 50, char2_pos[1] - 100))
+
+        except Exception as e:
+            logger.error(f"Error drawing HP bars: {e}")
+
     def _update_battle_display(self, char1: Character, char2: Character, char1_hp: int, char2_hp: int, current_turn: BattleTurn, recent_logs: List[str]):
         """Update the battle visualization"""
         if not self.screen:
             return
-            
+
         try:
             # Process pygame events to keep window responsive
             should_quit = False
@@ -428,191 +640,12 @@ class BattleEngine:
             # If user wants to quit, return early to end battle
             if should_quit:
                 return
-            # Clear screen
-            self.screen.fill((240, 248, 255))  # Light blue background
-            
-            # Draw battle arena
-            arena_rect = pygame.Rect(50, 100, Settings.SCREEN_WIDTH - 100, 400)
-            pygame.draw.rect(self.screen, (200, 220, 200), arena_rect)
-            pygame.draw.rect(self.screen, (100, 100, 100), arena_rect, 3)
-            
-            # Character positions
-            char1_pos = (200, 300)
-            char2_pos = (Settings.SCREEN_WIDTH - 200, 300)
-            
-            # Draw characters with images
-            self._draw_character(char1, char1_pos, char1_hp)
-            self._draw_character(char2, char2_pos, char2_hp)
-            
-            # Draw character names
-            name1_surface = self.font.render(char1.name, True, (0, 0, 0))
-            name2_surface = self.font.render(char2.name, True, (0, 0, 0))
-            self.screen.blit(name1_surface, (char1_pos[0] - 40, char1_pos[1] + 70))
-            self.screen.blit(name2_surface, (char2_pos[0] - 40, char2_pos[1] + 70))
-            
-            # Draw HP bars
-            hp_bar_width = 100
-            hp_bar_height = 20
-            
-            # Calculate HP ratios
-            char1_hp_ratio = char1_hp / char1.hp
-            char2_hp_ratio = char2_hp / char2.hp
-            
-            # Character 1 HP bar
-            hp1_bar_rect = pygame.Rect(char1_pos[0] - 50, char1_pos[1] - 80, hp_bar_width, hp_bar_height)
-            hp1_fill_width = int(hp_bar_width * char1_hp_ratio)
-            hp1_fill_rect = pygame.Rect(char1_pos[0] - 50, char1_pos[1] - 80, hp1_fill_width, hp_bar_height)
-            
-            pygame.draw.rect(self.screen, (255, 255, 255), hp1_bar_rect)
-            pygame.draw.rect(self.screen, (0, 255, 0), hp1_fill_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, 2)
-            
-            # Character 2 HP bar
-            hp2_bar_rect = pygame.Rect(char2_pos[0] - 50, char2_pos[1] - 80, hp_bar_width, hp_bar_height)
-            hp2_fill_width = int(hp_bar_width * char2_hp_ratio)
-            hp2_fill_rect = pygame.Rect(char2_pos[0] - 50, char2_pos[1] - 80, hp2_fill_width, hp_bar_height)
-            
-            pygame.draw.rect(self.screen, (255, 255, 255), hp2_bar_rect)
-            pygame.draw.rect(self.screen, (0, 255, 0), hp2_fill_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, 2)
-            
-            # Draw HP text
-            hp1_text = f"HP: {char1_hp}/{char1.hp}"
-            hp2_text = f"HP: {char2_hp}/{char2.hp}"
-            hp1_surface = self.small_font.render(hp1_text, True, (0, 0, 0))
-            hp2_surface = self.small_font.render(hp2_text, True, (0, 0, 0))
-            self.screen.blit(hp1_surface, (char1_pos[0] - 50, char1_pos[1] - 100))
-            self.screen.blit(hp2_surface, (char2_pos[0] - 50, char2_pos[1] - 100))
-            
-            # Draw recent battle log
-            log_start_y = 520
-            for i, log_entry in enumerate(recent_logs):
-                log_surface = self.small_font.render(log_entry, True, (0, 0, 0))
-                self.screen.blit(log_surface, (50, log_start_y + i * 25))
-            
-            # Draw attack effect
-            if current_turn and not current_turn.is_miss:
-                self._draw_attack_effect(current_turn, char1_pos, char2_pos, char1, char2)
-            
-            # Update display
-            pygame.display.flip()
-            
-            # Control frame rate
-            if self.clock:
-                self.clock.tick(Settings.FPS)
+
+            # Just render one final frame with logs
+            self._render_battle_frame(char1, char2, char1_hp, char2_hp, current_turn, recent_logs)
             
         except Exception as e:
             logger.error(f"Error updating battle display: {e}")
-    
-    def _draw_attack_effect(self, turn: BattleTurn, char1_pos: Tuple[int, int], char2_pos: Tuple[int, int], char1: Character, char2: Character):
-        """Draw visual attack effects"""
-        try:
-            # Determine positions
-            if turn.attacker_id == char1.id:
-                attacker_pos, defender_pos = char1_pos, char2_pos
-                attacker = char1
-                defender = char2
-            else:
-                attacker_pos, defender_pos = char2_pos, char1_pos
-                attacker = char2
-                defender = char1
-            
-            # Draw different effects based on action type and play sounds
-            if turn.is_miss:
-                # Miss effect
-                self._draw_miss_effect(defender_pos)
-                audio_manager.play_sound("miss")
-            elif turn.action_type == "magic":
-                # Enhanced magic attack effect
-                self._draw_magic_effect(defender_pos, turn.is_critical)
-                audio_manager.play_sound("magic", 1.2 if turn.is_critical else 1.0)
-            elif turn.is_critical:
-                # Critical hit effect
-                self._draw_critical_effect(attacker_pos, defender_pos)
-                audio_manager.play_sound("critical")
-            else:
-                # Normal attack effect
-                self._draw_normal_attack_effect(attacker_pos, defender_pos)
-                audio_manager.play_sound("attack")
-            
-            # Draw floating damage text with animation
-            if turn.damage > 0:
-                self._draw_damage_text(turn, defender_pos)
-                
-        except Exception as e:
-            logger.error(f"Error drawing attack effect: {e}")
-    
-    def _draw_magic_effect(self, target_pos: Tuple[int, int], is_critical: bool):
-        """Draw magic attack effect"""
-        try:
-            # Magic circle effect
-            current_time = pygame.time.get_ticks()
-            radius = 30 + int(10 * math.sin(current_time * 0.01))
-            
-            # Outer ring
-            pygame.draw.circle(self.screen, (100, 100, 255), target_pos, radius, 3)
-            # Inner ring
-            pygame.draw.circle(self.screen, (200, 200, 255), target_pos, radius // 2, 2)
-            
-            # Sparkling particles
-            for i in range(8 if is_critical else 5):
-                angle = (current_time * 0.01 + i * (2 * math.pi / (8 if is_critical else 5))) % (2 * math.pi)
-                spark_x = target_pos[0] + int((radius + 10) * math.cos(angle))
-                spark_y = target_pos[1] + int((radius + 10) * math.sin(angle))
-                color = (255, 255, 150) if is_critical else (150, 150, 255)
-                pygame.draw.circle(self.screen, color, (spark_x, spark_y), 4)
-            
-        except Exception as e:
-            logger.error(f"Error drawing magic effect: {e}")
-    
-    def _draw_critical_effect(self, attacker_pos: Tuple[int, int], defender_pos: Tuple[int, int]):
-        """Draw critical hit effect"""
-        try:
-            # Lightning bolt effect
-            points = [attacker_pos]
-            segments = 4
-            for i in range(1, segments):
-                t = i / segments
-                x = int(attacker_pos[0] + t * (defender_pos[0] - attacker_pos[0]))
-                y = int(attacker_pos[1] + t * (defender_pos[1] - attacker_pos[1]))
-                # Add random jagged offset
-                x += random.randint(-15, 15)
-                y += random.randint(-15, 15)
-                points.append((x, y))
-            points.append(defender_pos)
-            
-            # Draw lightning bolt
-            if len(points) > 2:
-                pygame.draw.lines(self.screen, (255, 255, 100), False, points, 4)
-                pygame.draw.lines(self.screen, (255, 255, 255), False, points, 2)
-            
-            # Flash effect around defender
-            for radius in [40, 30, 20]:
-                alpha = max(10, 100 - (40 - radius) * 3)
-                flash_surface = pygame.Surface((radius * 2, radius * 2))
-                flash_surface.set_alpha(alpha)
-                flash_surface.fill((255, 255, 200))
-                self.screen.blit(flash_surface, (defender_pos[0] - radius, defender_pos[1] - radius))
-            
-        except Exception as e:
-            logger.error(f"Error drawing critical effect: {e}")
-    
-    def _draw_normal_attack_effect(self, attacker_pos: Tuple[int, int], defender_pos: Tuple[int, int]):
-        """Draw normal attack effect"""
-        try:
-            # Impact lines
-            pygame.draw.line(self.screen, (255, 100, 100), attacker_pos, defender_pos, 5)
-            pygame.draw.line(self.screen, (255, 200, 200), attacker_pos, defender_pos, 2)
-            
-            # Impact burst at defender position
-            for i in range(6):
-                angle = i * (2 * math.pi / 6)
-                end_x = defender_pos[0] + int(25 * math.cos(angle))
-                end_y = defender_pos[1] + int(25 * math.sin(angle))
-                pygame.draw.line(self.screen, (255, 150, 150), defender_pos, (end_x, end_y), 2)
-            
-        except Exception as e:
-            logger.error(f"Error drawing normal attack effect: {e}")
     
     def _draw_damage_text(self, turn: BattleTurn, position: Tuple[int, int]):
         """Draw animated damage text"""
@@ -620,62 +653,40 @@ class BattleEngine:
             # Determine text color and style
             if turn.is_critical:
                 damage_color = (255, 255, 100)  # Yellow for critical
-                font_size = 32
+                font_size = 36
                 damage_text = f"{turn.damage}!!"
             else:
                 damage_color = (255, 100, 100)  # Red for normal
-                font_size = 24
+                font_size = 28
                 damage_text = str(turn.damage)
-            
+
             # Create font for damage text
             try:
                 damage_font = pygame.font.Font(None, font_size)
             except:
                 damage_font = self.font  # Fallback to existing font
-                
+
             damage_surface = damage_font.render(damage_text, True, damage_color)
-            
+
             # Add floating animation
-            float_offset = int(10 * math.sin(pygame.time.get_ticks() * 0.01))
-            text_pos = (position[0] - damage_surface.get_width() // 2, 
+            float_offset = int(15 * math.sin(pygame.time.get_ticks() * 0.008))
+            text_pos = (position[0] - damage_surface.get_width() // 2,
                        position[1] - 140 - float_offset)
-            
+
             # Draw text with outline for better visibility
             try:
                 outline_surface = damage_font.render(damage_text, True, (0, 0, 0))
-                for dx in [-1, 0, 1]:
-                    for dy in [-1, 0, 1]:
+                for dx in [-2, 0, 2]:
+                    for dy in [-2, 0, 2]:
                         if dx != 0 or dy != 0:
                             self.screen.blit(outline_surface, (text_pos[0] + dx, text_pos[1] + dy))
             except:
                 pass  # Skip outline if it fails
-            
+
             self.screen.blit(damage_surface, text_pos)
-            
+
         except Exception as e:
             logger.error(f"Error drawing damage text: {e}")
-    
-    def _draw_miss_effect(self, position: Tuple[int, int]):
-        """Draw miss effect"""
-        try:
-            miss_surface = self.font.render("MISS!", True, (200, 200, 200))
-            
-            # Floating animation
-            float_offset = int(8 * math.sin(pygame.time.get_ticks() * 0.008))
-            text_pos = (position[0] - miss_surface.get_width() // 2, 
-                       position[1] - 120 - float_offset)
-            
-            # Draw with outline
-            try:
-                outline_surface = self.font.render("MISS!", True, (100, 100, 100))
-                self.screen.blit(outline_surface, (text_pos[0] + 1, text_pos[1] + 1))
-            except:
-                pass
-                
-            self.screen.blit(miss_surface, text_pos)
-            
-        except Exception as e:
-            logger.error(f"Error drawing miss effect: {e}")
     
     def _start_battle_bgm(self):
         """Start battle background music"""
@@ -693,33 +704,29 @@ class BattleEngine:
         """Draw character with image or fallback to colored rectangle"""
         try:
             max_width, max_height = 120, 120  # Maximum display size
-            
+
             # Try to load and display character image
             character_sprite = self._load_character_sprite(character)
-            
+
             if character_sprite:
                 # Scale image while preserving aspect ratio
                 original_width, original_height = character_sprite.get_size()
                 scale_x = max_width / original_width
                 scale_y = max_height / original_height
                 scale = min(scale_x, scale_y)  # Use smaller scale to fit within bounds
-                
+
                 new_width = int(original_width * scale)
                 new_height = int(original_height * scale)
-                
+
                 scaled_sprite = pygame.transform.scale(character_sprite, (new_width, new_height))
-                
+
                 # Calculate position to center the image
                 char_x = position[0] - new_width // 2
                 char_y = position[1] - new_height // 2
-                
+
                 # Apply HP-based effects
-                hp_ratio = current_hp / character.hp
-                
-                # Add battle animation effect (slight bobbing)
-                bob_offset = int(2 * math.sin(pygame.time.get_ticks() * 0.003))
-                char_y += bob_offset
-                
+                hp_ratio = max(0, current_hp / character.hp)
+
                 if hp_ratio < 0.5:  # Apply red tint when HP is low
                     # Create a red overlay with simpler blending
                     red_overlay = pygame.Surface((new_width, new_height))
@@ -727,7 +734,7 @@ class BattleEngine:
                     red_overlay.set_alpha(alpha)
                     red_overlay.fill((255, 80, 80))  # Red damage indicator
                     scaled_sprite.blit(red_overlay, (0, 0))
-                
+
                 # Draw the character image
                 self.screen.blit(scaled_sprite, (char_x, char_y))
             else:
@@ -736,12 +743,12 @@ class BattleEngine:
                 char_x = position[0] - char_width // 2
                 char_y = position[1] - char_height // 2
                 char_rect = pygame.Rect(char_x, char_y, char_width, char_height)
-                hp_ratio = current_hp / character.hp
-                char_color = (255 * (1 - hp_ratio), 255 * hp_ratio, 0)
-                
+                hp_ratio = max(0, current_hp / character.hp)
+                char_color = (int(255 * (1 - hp_ratio)), int(255 * hp_ratio), 0)
+
                 pygame.draw.rect(self.screen, char_color, char_rect)
                 pygame.draw.rect(self.screen, (0, 0, 0), char_rect, 2)
-                
+
         except Exception as e:
             logger.error(f"Error drawing character {character.name}: {e}")
             # Emergency fallback - draw simple rectangle
@@ -936,13 +943,19 @@ class BattleEngine:
         try:
             # Reset battle state
             self.current_battle = None
-            
+
             # Clear sprite cache to free memory
             self.battle_sprites.clear()
-            
+
+            # Clear effect systems
+            if self.effects:
+                self.effects.clear()
+            if self.animator:
+                self.animator.clear()
+
             # Close the battle window properly
             self._close_battle_window()
-                
+
             logger.debug("Battle state cleaned up")
         except Exception as e:
             logger.error(f"Error during battle cleanup: {e}")
