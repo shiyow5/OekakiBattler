@@ -1004,14 +1004,17 @@ class BattleEngine:
                     new_w, new_h = int(original_w * char_scale * 1.2), int(original_h * char_scale * 1.2)  # 20% larger for winner
                     scaled_winner = pygame.transform.scale(winner_sprite, (new_w, new_h))
 
-                    # Draw winner with golden border
+                    # Draw white background for character
                     winner_pos = (screen_width // 2 - char_x_offset, char_y_winner)
-                    border_width = int(8 * scale)
                     border_padding = int(10 * scale)
-                    border_rect = pygame.Rect(winner_pos[0] - border_padding, winner_pos[1] - border_padding,
-                                             new_w + border_padding * 2, new_h + border_padding * 2)
-                    pygame.draw.rect(self.screen, winner_color, border_rect, border_width)
-                    pygame.draw.rect(self.screen, winner_bg_color, border_rect, int(4 * scale))
+                    bg_rect = pygame.Rect(winner_pos[0] - border_padding, winner_pos[1] - border_padding,
+                                         new_w + border_padding * 2, new_h + border_padding * 2)
+                    pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)  # White background
+
+                    # Draw winner with golden border
+                    border_width = int(8 * scale)
+                    pygame.draw.rect(self.screen, winner_color, bg_rect, border_width)
+                    pygame.draw.rect(self.screen, winner_bg_color, bg_rect, int(4 * scale))
                     self.screen.blit(scaled_winner, winner_pos)
 
                     # Draw crown symbol above winner (using simple shapes instead of emoji)
@@ -1038,7 +1041,7 @@ class BattleEngine:
                     pygame.draw.circle(self.screen, (50, 50, 255),
                                      (crown_center_x + int(15 * crown_size), crown_center_y), int(4 * crown_size))
 
-                # Loser character (right side, smaller, dimmed)
+                # Loser character (right side, smaller)
                 if loser:
                     loser_sprite = self._load_character_sprite(loser)
                     if loser_sprite:
@@ -1047,20 +1050,17 @@ class BattleEngine:
                         new_w, new_h = int(original_w * char_scale_loser * 0.75), int(original_h * char_scale_loser * 0.75)  # 25% smaller for loser
                         scaled_loser = pygame.transform.scale(loser_sprite, (new_w, new_h))
 
-                        # Apply gray overlay
-                        gray_overlay = pygame.Surface((new_w, new_h))
-                        gray_overlay.set_alpha(120)
-                        gray_overlay.fill((80, 80, 80))
-                        scaled_loser.blit(gray_overlay, (0, 0))
-
-                        # Draw loser with gray border
+                        # Draw white background for character
                         char_y_loser = int(250 * scale_y)
                         loser_x_offset = int(80 * scale_x)
                         loser_pos = (screen_width // 2 + loser_x_offset, char_y_loser)
                         loser_border_padding = int(5 * scale)
-                        border_rect = pygame.Rect(loser_pos[0] - loser_border_padding, loser_pos[1] - loser_border_padding,
-                                                 new_w + loser_border_padding * 2, new_h + loser_border_padding * 2)
-                        pygame.draw.rect(self.screen, (100, 100, 100), border_rect, int(4 * scale))
+                        bg_rect = pygame.Rect(loser_pos[0] - loser_border_padding, loser_pos[1] - loser_border_padding,
+                                             new_w + loser_border_padding * 2, new_h + loser_border_padding * 2)
+                        pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)  # White background
+
+                        # Draw loser with gray border
+                        pygame.draw.rect(self.screen, (100, 100, 100), bg_rect, int(4 * scale))
                         self.screen.blit(scaled_loser, loser_pos)
 
             # Draw battle stats with better formatting

@@ -1,5 +1,71 @@
 # 変更履歴 (CHANGES.md)
 
+## 2025-09-30 (修正21): リザルト画面のキャラクター背景を白色に変更
+
+### 変更内容
+リザルト画面（勝利画面）のキャラクター画像の背景を白色にし、敗者のグレーオーバーレイを削除しました。
+
+**修正ファイル:**
+- `src/services/battle_engine.py`
+
+**変更点:**
+
+1. **勝者キャラクターの背景**
+```python
+# キャラクター画像の背後に白い矩形を描画
+bg_rect = pygame.Rect(winner_pos[0] - border_padding, winner_pos[1] - border_padding,
+                     new_w + border_padding * 2, new_h + border_padding * 2)
+pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)  # White background
+
+# その後、ゴールドの枠線とキャラクター画像を描画
+```
+
+2. **敗者キャラクターの背景とオーバーレイ削除**
+```python
+# 旧: グレーオーバーレイを適用
+gray_overlay = pygame.Surface((new_w, new_h))
+gray_overlay.set_alpha(120)
+gray_overlay.fill((80, 80, 80))
+scaled_loser.blit(gray_overlay, (0, 0))
+
+# 新: オーバーレイなし、白い背景のみ
+bg_rect = pygame.Rect(loser_pos[0] - loser_border_padding, loser_pos[1] - loser_border_padding,
+                     new_w + loser_border_padding * 2, new_h + loser_border_padding * 2)
+pygame.draw.rect(self.screen, (255, 255, 255), bg_rect)  # White background
+```
+
+**描画順序:**
+```
+1. グラデーション背景（暗い色）
+2. 白い矩形（キャラクター背景）
+3. 枠線（ゴールドまたはグレー）
+4. キャラクター画像（グレーオーバーレイなし）
+```
+
+**効果:**
+- ✅ 勝者・敗者ともにキャラクター画像がはっきり見える
+- ✅ 透過PNGのキャラクターも背景が白で統一される
+- ✅ 暗いグラデーション背景とのコントラストで見やすい
+- ✅ 枠線の色（ゴールド/グレー）で勝者・敗者の区別が明確
+- ✅ 敗者のキャラクターも元の色で表示される
+
+**見た目:**
+```
+┌─────────────────────────────┐
+│ 暗いグラデーション背景       │
+│   ┌─────────┐               │
+│   │白い背景  │ ← 勝者       │
+│   │ キャラ  │               │
+│   └─────────┘               │
+│           ┌─────┐           │
+│           │白背景│ ← 敗者   │
+│           │キャラ│           │
+│           └─────┘           │
+└─────────────────────────────┘
+```
+
+---
+
 ## 2025-09-30 (修正20): HP低下時の赤色エフェクトを削除
 
 ### 変更内容
