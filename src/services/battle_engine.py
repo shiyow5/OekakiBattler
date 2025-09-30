@@ -198,20 +198,24 @@ class BattleEngine:
                     # Execute turn
                     turn = self.execute_turn(attacker, defender, turn_number, attacker_hp, defender_hp)
                     battle.add_turn(turn)
-                    
-                    # Update HP
+
+                    # Add log entry
+                    log_message = self._create_turn_log(attacker, defender, turn)
+                    battle.add_log_entry(log_message)
+
+                    # Visual update - animate BEFORE updating HP
+                    if visual_mode and self.screen:
+                        # Pass current HP (before damage) to animation
+                        self._animate_turn(char1, char2, turn, char1_current_hp, char2_current_hp)
+
+                    # Update HP AFTER animation
                     if attacker.id == char1.id:
                         char2_current_hp = turn.defender_hp_after
                     else:
                         char1_current_hp = turn.defender_hp_after
-                    
-                    # Add log entry
-                    log_message = self._create_turn_log(attacker, defender, turn)
-                    battle.add_log_entry(log_message)
-                    
-                    # Visual update
+
+                    # Final display with updated HP
                     if visual_mode and self.screen:
-                        self._animate_turn(char1, char2, turn, char1_current_hp, char2_current_hp)
                         self._update_battle_display(char1, char2, char1_current_hp, char2_current_hp, turn, battle.battle_log[-5:])
                         time.sleep(0.5 * self.battle_speed)
                     
@@ -421,7 +425,9 @@ class BattleEngine:
             return f"{attacker.name} attacks {defender.name}"
     
     def _animate_turn(self, char1: Character, char2: Character, turn: BattleTurn, char1_hp: int, char2_hp: int):
-        """Animate a battle turn with smooth effects"""
+        """Animate a battle turn with smooth effects
+        Note: char1_hp and char2_hp are the HP values BEFORE damage
+        """
         if not self.screen or not self.effects or not self.animator:
             return
 
@@ -434,16 +440,35 @@ class BattleEngine:
                 attacker, defender = char1, char2
                 attacker_pos = (200, 300)
                 defender_pos = (Settings.SCREEN_WIDTH - 200, 300)
+                # Defender is char2
+                defender_hp_before = char2_hp
+                defender_hp_after = turn.defender_hp_after
             else:
                 attacker, defender = char2, char1
                 attacker_pos = (Settings.SCREEN_WIDTH - 200, 300)
                 defender_pos = (200, 300)
+                # Defender is char1
+                defender_hp_before = char1_hp
+                defender_hp_after = turn.defender_hp_after
 
-            # Phase 1: Pre-attack animation (jump/charge)
-            self.animator.start_animation(attacker.id, 'bounce', 20, bounces=3, height=20)
+            # Calculate frame counts based on battle_speed
+            # battle_speed: 0.01 (fastest) to 3.0 (slowest), default 0.5
+            # Higher battle_speed = more frames = slower animation
+            speed_multiplier = self.battle_speed * 2  # Convert to reasonable multiplier (0.02 to 6.0)
 
-            for _ in range(20):
-                self._render_battle_frame(char1, char2, char1_hp, char2_hp, turn, recent_logs)
+            bounce_frames = int(50 * speed_multiplier)
+            charge_frames = int(30 * speed_multiplier)
+            windup_frames = int(15 * speed_multiplier)
+            recovery_frames = int(50 * speed_multiplier)
+            miss_frames = int(30 * speed_multiplier)
+            shake_frames = int(20 * speed_multiplier)
+
+            # Phase 1: Pre-attack animation (jump/charge) - no damage display yet
+            bounce_duration = bounce_frames
+            self.animator.start_animation(attacker.id, 'bounce', bounce_duration, bounces=3, height=20)
+
+            for _ in range(bounce_frames):
+                self._render_battle_frame(char1, char2, char1_hp, char2_hp, None, recent_logs)
                 self.clock.tick(60)
 
             # Phase 2: Attack animation
@@ -458,55 +483,81 @@ class BattleEngine:
                     direction = (direction[0]/length, direction[1]/length)
 
                 if turn.action_type == "magic":
-                    # Magic attack animation
-                    self.effects.create_charge_effect(attacker_pos[0], attacker_pos[1], 15)
-                    for _ in range(15):
-                        self._render_battle_frame(char1, char2, char1_hp, char2_hp, turn, recent_logs)
+                    # Magic attack animation - charge phase (no damage display yet)
+                    self.effects.create_charge_effect(attacker_pos[0], attacker_pos[1], 25)
+                    for _ in range(charge_frames):
+                        self._render_battle_frame(char1, char2, char1_hp, char2_hp, None, recent_logs)
                         self.clock.tick(60)
 
-                    self.effects.create_magic_particles(defender_pos[0], defender_pos[1], 30)
+                    # Play sound immediately when charge completes
                     if turn.is_critical:
-                        self.effects.screen_shake(15, 10)
-                        self.effects.create_explosion(defender_pos[0], defender_pos[1], 40, (200, 100, 255))
                         audio_manager.play_sound("magic", 1.2)
                         audio_manager.play_sound("critical")
                     else:
-                        self.effects.screen_shake(8, 8)
                         audio_manager.play_sound("magic", 1.0)
 
+                    # Impact phase - now show damage
+                    self.effects.create_magic_particles(defender_pos[0], defender_pos[1], 50)
+                    if turn.is_critical:
+                        self.effects.screen_shake(20, 12)
+                        self.effects.create_explosion(defender_pos[0], defender_pos[1], 60, (200, 100, 255))
+                    else:
+                        self.effects.screen_shake(10, 10)
+
                 else:
-                    # Physical attack animation
+                    # Physical attack animation - brief windup before impact
+                    for _ in range(windup_frames):
+                        self._render_battle_frame(char1, char2, char1_hp, char2_hp, None, recent_logs)
+                        self.clock.tick(60)
+
+                    # Play sound immediately at impact moment
+                    if turn.is_critical:
+                        audio_manager.play_sound("critical")
+                    else:
+                        audio_manager.play_sound("attack")
+
+                    # Now create impact effects and show damage
                     self.effects.create_slash_trail(attacker_pos, defender_pos)
                     self.effects.create_impact_particles(
                         defender_pos[0], defender_pos[1],
-                        direction, 15
+                        direction, 25
                     )
 
                     if turn.is_critical:
-                        self.effects.screen_shake(12, 10)
-                        self.effects.create_explosion(defender_pos[0], defender_pos[1], 30, (255, 200, 0))
-                        audio_manager.play_sound("critical")
+                        self.effects.screen_shake(18, 12)
+                        self.effects.create_explosion(defender_pos[0], defender_pos[1], 50, (255, 200, 0))
                     else:
-                        self.effects.screen_shake(6, 6)
-                        audio_manager.play_sound("attack")
+                        self.effects.screen_shake(8, 8)
 
                 # Defender reaction animation
-                self.animator.start_animation(defender.id, 'shake', 10, intensity=8)
+                self.animator.start_animation(defender.id, 'shake', shake_frames, intensity=8)
 
             else:
                 # Miss animation
-                self.animator.start_animation(defender.id, 'jump', 15, height=25)
+                self.animator.start_animation(defender.id, 'jump', miss_frames, height=25)
                 audio_manager.play_sound("miss")
 
-            # Phase 3: Impact and recovery
-            for _ in range(30):
-                self._render_battle_frame(char1, char2, char1_hp, char2_hp, turn, recent_logs)
+            # Phase 3: Impact and recovery - gradually reduce HP
+            for i in range(recovery_frames):
+                # Calculate HP reduction progress (0.0 to 1.0)
+                progress = (i + 1) / recovery_frames
+
+                # Interpolate HP from before to after
+                if turn.attacker_id == char1.id:
+                    # char2 is defender
+                    current_char2_hp = int(defender_hp_before - (defender_hp_before - defender_hp_after) * progress)
+                    self._render_battle_frame(char1, char2, char1_hp, current_char2_hp, turn, recent_logs)
+                else:
+                    # char1 is defender
+                    current_char1_hp = int(defender_hp_before - (defender_hp_before - defender_hp_after) * progress)
+                    self._render_battle_frame(char1, char2, current_char1_hp, char2_hp, turn, recent_logs)
+
                 self.clock.tick(60)
 
         except Exception as e:
             logger.error(f"Error animating turn: {e}")
 
-    def _render_battle_frame(self, char1: Character, char2: Character, char1_hp: int, char2_hp: int, current_turn: BattleTurn, recent_logs: List[str]):
+    def _render_battle_frame(self, char1: Character, char2: Character, char1_hp: int, char2_hp: int, current_turn: Optional[BattleTurn], recent_logs: List[str]):
         """Render a single battle frame with all effects"""
         if not self.screen:
             return
@@ -652,12 +703,12 @@ class BattleEngine:
         try:
             # Determine text color and style
             if turn.is_critical:
-                damage_color = (255, 255, 100)  # Yellow for critical
-                font_size = 36
+                damage_color = (255, 255, 50)  # Bright yellow for critical
+                font_size = 72
                 damage_text = f"{turn.damage}!!"
             else:
-                damage_color = (255, 100, 100)  # Red for normal
-                font_size = 28
+                damage_color = (255, 80, 80)  # Red for normal
+                font_size = 52
                 damage_text = str(turn.damage)
 
             # Create font for damage text
@@ -668,16 +719,16 @@ class BattleEngine:
 
             damage_surface = damage_font.render(damage_text, True, damage_color)
 
-            # Add floating animation
-            float_offset = int(15 * math.sin(pygame.time.get_ticks() * 0.008))
+            # Add floating animation with larger movement
+            float_offset = int(25 * math.sin(pygame.time.get_ticks() * 0.008))
             text_pos = (position[0] - damage_surface.get_width() // 2,
-                       position[1] - 140 - float_offset)
+                       position[1] - 180 - float_offset)
 
-            # Draw text with outline for better visibility
+            # Draw text with thicker outline for better visibility
             try:
                 outline_surface = damage_font.render(damage_text, True, (0, 0, 0))
-                for dx in [-2, 0, 2]:
-                    for dy in [-2, 0, 2]:
+                for dx in [-3, -1, 0, 1, 3]:
+                    for dy in [-3, -1, 0, 1, 3]:
                         if dx != 0 or dy != 0:
                             self.screen.blit(outline_surface, (text_pos[0] + dx, text_pos[1] + dy))
             except:

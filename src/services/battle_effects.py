@@ -72,11 +72,11 @@ class BattleEffects:
         """Create an explosion effect"""
         for _ in range(particle_count):
             angle = random.uniform(0, 2 * math.pi)
-            speed = random.uniform(2, 8)
+            speed = random.uniform(3, 12)
             vx = math.cos(angle) * speed
             vy = math.sin(angle) * speed
-            life = random.uniform(20, 40)
-            size = random.uniform(2, 6)
+            life = random.uniform(25, 50)
+            size = random.uniform(4, 10)
 
             # Color variation
             r = max(0, min(255, color[0] + random.randint(-30, 30)))
@@ -88,7 +88,7 @@ class BattleEffects:
     def create_slash_trail(self, start: Tuple[int, int], end: Tuple[int, int],
                           color: Tuple[int, int, int] = (255, 255, 200)):
         """Create a slash trail effect with particles"""
-        steps = 15
+        steps = 25
         for i in range(steps):
             t = i / steps
             x = start[0] + (end[0] - start[0]) * t
@@ -102,14 +102,14 @@ class BattleEffects:
                 dx /= length
                 dy /= length
 
-            offset = random.uniform(-5, 5)
+            offset = random.uniform(-10, 10)
             px = x + dx * offset
             py = y + dy * offset
 
-            vx = random.uniform(-1, 1)
-            vy = random.uniform(-1, 1)
-            life = random.uniform(10, 20)
-            size = random.uniform(3, 7)
+            vx = random.uniform(-2, 2)
+            vy = random.uniform(-2, 2)
+            life = random.uniform(15, 30)
+            size = random.uniform(5, 12)
 
             self.add_particle(px, py, vx, vy, life, color, size, gravity=0.1)
 
@@ -117,10 +117,10 @@ class BattleEffects:
         """Create magical sparkle particles"""
         for _ in range(particle_count):
             angle = random.uniform(0, 2 * math.pi)
-            speed = random.uniform(1, 5)
+            speed = random.uniform(2, 8)
             vx = math.cos(angle) * speed
             vy = math.sin(angle) * speed
-            life = random.uniform(30, 60)
+            life = random.uniform(40, 70)
 
             # Magic colors (blue, purple, white)
             colors = [
@@ -130,7 +130,7 @@ class BattleEffects:
                 (150, 150, 255)
             ]
             color = random.choice(colors)
-            size = random.uniform(2, 5)
+            size = random.uniform(4, 9)
 
             self.add_particle(x, y, vx, vy, life, color, size, gravity=-0.1)
 
@@ -138,17 +138,17 @@ class BattleEffects:
                                particle_count: int = 15):
         """Create impact particles that fly in a direction"""
         for _ in range(particle_count):
-            angle_variation = random.uniform(-0.5, 0.5)
-            speed = random.uniform(3, 10)
+            angle_variation = random.uniform(-0.6, 0.6)
+            speed = random.uniform(5, 15)
 
             # Base direction with variation
             angle = math.atan2(direction[1], direction[0]) + angle_variation
             vx = math.cos(angle) * speed
             vy = math.sin(angle) * speed
 
-            life = random.uniform(15, 30)
+            life = random.uniform(20, 40)
             color = (255, random.randint(50, 150), random.randint(50, 150))
-            size = random.uniform(2, 5)
+            size = random.uniform(4, 9)
 
             self.add_particle(x, y, vx, vy, life, color, size)
 
@@ -157,17 +157,17 @@ class BattleEffects:
         for _ in range(particle_count):
             # Particles start far and move toward center
             angle = random.uniform(0, 2 * math.pi)
-            distance = random.uniform(40, 80)
+            distance = random.uniform(60, 120)
             start_x = x + math.cos(angle) * distance
             start_y = y + math.sin(angle) * distance
 
             # Velocity toward center
-            vx = (x - start_x) * 0.05
-            vy = (y - start_y) * 0.05
+            vx = (x - start_x) * 0.06
+            vy = (y - start_y) * 0.06
 
-            life = random.uniform(20, 35)
+            life = random.uniform(25, 45)
             color = (255, 255, random.randint(100, 255))
-            size = random.uniform(2, 4)
+            size = random.uniform(4, 8)
 
             self.add_particle(start_x, start_y, vx, vy, life, color, size, gravity=0)
 
