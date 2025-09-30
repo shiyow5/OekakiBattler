@@ -16,12 +16,15 @@
 - 📊 **詳細統計管理**: 戦績、勝率、キャラクター性能の追跡
 - 🎲 **ランダムマッチ**: 自動でキャラクターをマッチング
 - 💾 **データ永続化**: SQLiteによる確実なデータ保存
+- 📱 **LINE Bot連携**: LINEから画像を送信してキャラクター登録・Google Drive保存
 
 ## 🚀 クイックスタート
 
 ### 必要環境
 - Python 3.11+
 - Google AI API キー
+- Node.js 14+ (LINE Bot機能を使用する場合)
+- ngrok (ローカル開発用)
 
 ### インストール
 
@@ -45,16 +48,180 @@ pip install -r requirements.txt
 ```
 
 4. **環境変数を設定**
+
+メインアプリケーション用の`.env`ファイルを作成：
 ```bash
-# .envファイルを作成
+# メインアプリケーション用の環境変数
 echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
 echo "MODEL_NAME=gemini-2.5-flash-lite-preview-06-17" >> .env
 ```
+
+LINE Bot機能を使用する場合は、`server/.env`ファイルも作成：
+```bash
+# server/.envファイルを作成
+mkdir -p server
+cat > server/.env << EOF
+PORT=3000
+LINE_CHANNEL_SECRET=your_line_channel_secret
+LINE_CHANNEL_ACCESS_TOKEN=your_channel_access_token
+GAS_WEBHOOK_URL=https://script.google.com/macros/s/XXXXX/exec
+SHARED_SECRET=some_random_shared_secret_for_gas
+EOF
+```
+
+**重要**: 実際の値に置き換えてください：
+- `your_google_api_key_here`: Google AI APIキー
+- `your_line_channel_secret`: LINE Developers Consoleで取得したChannel Secret
+- `your_channel_access_token`: LINE Developers Consoleで取得したChannel Access Token
+- `https://script.google.com/macros/s/XXXXX/exec`: Google Apps ScriptのWebアプリURL
+- `some_random_shared_secret_for_gas`: GASとの認証用のランダムな文字列
 
 5. **アプリケーションを起動**
 ```bash
 python main.py
 ```
+
+## 📱 LINE Bot機能
+
+LINE Bot機能を使用すると、LINEから画像を送信してキャラクターを登録し、Google Driveに自動保存できます。
+
+### LINE Bot設定手順
+
+#### 1. LINE Developers Console設定
+
+1. [LINE Developers](https://developers.line.biz/) にログイン
+2. Providerを作成 → **Messaging APIチャンネル**を作成
+3. **Channel Secret**と**Channel Access Token**を取得
+4. Webhook URLを設定（後述のngrok URLを使用）
+
+#### 2. Google Apps Script (GAS) 設定
+
+1. Googleスプレッドシートを作成
+2. 拡張機能 > Apps Script を開く
+3. 以下のコードを貼り付け：
+
+```javascript
+function doPost(e) {
+  try {
+    if (!e.postData || !e.postData.contents) return ContentService.createTextOutput('no data');
+
+    var payload = JSON.parse(e.postData.contents);
+    
+    // シークレット確認
+    var SHARED_SECRET = 'YOUR_SHARED_SECRET_HERE';
+    if (!payload.secret || payload.secret !== SHARED_SECRET) {
+      return ContentService.createTextOutput(JSON.stringify({ok:false, error:'forbidden'}))
+             .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var b64 = payload.image;
+    var mime = payload.mimeType || 'image/jpeg';
+    var filename = payload.filename || ('line_' + new Date().getTime() + '.jpg');
+
+    // Base64をデコードしてblobを作成
+    var blob = Utilities.newBlob(Utilities.base64Decode(b64), mime, filename);
+
+    // Driveに保存
+    var file = DriveApp.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    var url = file.getUrl();
+
+    // スプレッドシートに追記
+    var ssId = 'YOUR_SPREADSHEET_ID';
+    var ss = SpreadsheetApp.openById(ssId);
+    var sheet = ss.getSheetByName('Sheet1') || ss.getSheets()[0];
+    var now = new Date();
+    sheet.appendRow([now, filename, url]);
+
+    return ContentService.createTextOutput(JSON.stringify({ok:true, url:url}))
+           .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ok:false, error:err.toString()}))
+           .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+```
+
+4. **Deploy > New deployment** → **Web app**として公開
+5. 発行されたURLをメモ
+
+#### 3. 環境変数設定
+
+LINE Bot機能用の`server/.env`ファイルを作成：
+
+```bash
+# server/.envファイルを作成
+mkdir -p server
+cat > server/.env << EOF
+PORT=3000
+LINE_CHANNEL_SECRET=your_line_channel_secret
+LINE_CHANNEL_ACCESS_TOKEN=your_channel_access_token
+GAS_WEBHOOK_URL=https://script.google.com/macros/s/XXXXX/exec
+SHARED_SECRET=some_random_shared_secret_for_gas
+EOF
+```
+
+**設定値の取得方法**：
+- `LINE_CHANNEL_SECRET`: LINE Developers Console > チャンネル > Basic settings
+- `LINE_CHANNEL_ACCESS_TOKEN`: LINE Developers Console > チャンネル > Messaging API settings
+- `GAS_WEBHOOK_URL`: Google Apps Script > Deploy > Web app で発行されたURL
+- `SHARED_SECRET`: 任意のランダムな文字列（GAS側でも同じ値を使用）
+
+#### 4. サーバー起動
+
+`server_up.sh`スクリプトを使用してサーバーを起動：
+
+```bash
+# 実行権限を付与
+chmod +x server_up.sh
+
+# サーバー起動（ngrokも同時に起動）
+./server_up.sh
+```
+
+このスクリプトは以下を実行します：
+- Node.jsサーバーの起動
+- ngrokによるHTTPSトンネルの作成
+- プロセス終了時のクリーンアップ
+
+#### 5. LINE Bot設定完了
+
+1. ngrokが表示するHTTPS URLをコピー
+2. LINE Developers ConsoleのWebhook URLに設定
+3. Verify → 成功したら「Use webhook」を有効化
+4. LINE Botを友だち追加して画像を送信してテスト
+
+### 使用方法
+
+1. LINE Botを友だち追加
+2. キャラクター画像を送信
+3. 自動でGoogle Driveに保存され、スプレッドシートに記録
+4. メインアプリケーションでキャラクターとして登録可能
+
+### セキュリティ注意事項
+
+- **環境変数の管理**: `.env`ファイルは絶対にGitにコミットしない（`.gitignore`に追加済み）
+- **APIキーの保護**: Channel Access Token / Channel Secretは絶対に公開しない
+- **認証の実装**: GASのShared Secretで簡易認証を実装
+- **HTTPSの使用**: 本番環境では適切なHTTPS証明書を使用
+- **画像制限**: 画像サイズ制限と保存ポリシーを設計
+
+### 環境変数ファイルの管理
+
+プロジェクトには以下の環境変数ファイルがあります：
+
+1. **`.env`** (ルートディレクトリ): メインアプリケーション用
+   - `GOOGLE_API_KEY`: Google AI APIキー
+   - `MODEL_NAME`: 使用するAIモデル名
+
+2. **`server/.env`** (serverディレクトリ): LINE Bot機能用
+   - `PORT`: サーバーポート番号
+   - `LINE_CHANNEL_SECRET`: LINEチャンネルシークレット
+   - `LINE_CHANNEL_ACCESS_TOKEN`: LINEチャンネルアクセストークン
+   - `GAS_WEBHOOK_URL`: Google Apps ScriptのWebアプリURL
+   - `SHARED_SECRET`: GAS認証用シークレット
+
+**注意**: これらのファイルは機密情報を含むため、`.gitignore`に追加されており、Gitにコミットされません。
 
 ## 📖 使い方
 
@@ -99,6 +266,10 @@ OekakiBattler/
 │   ├── ui/                 # ユーザーインターフェース
 │   │   └── main_menu.py    # メインGUI
 │   └── utils/              # ユーティリティ
+├── server/                 # LINE Botサーバー
+│   ├── server.js           # Node.jsサーバー
+│   └── .env                # 環境変数設定
+├── server_up.sh            # サーバー起動スクリプト
 ├── data/                   # データファイル
 │   ├── characters/         # 元画像
 │   ├── sprites/           # 処理済みスプライト
@@ -128,11 +299,13 @@ AIは以下の観点でキャラクターを分析します：
 
 ## 📊 技術仕様
 
-- **言語**: Python 3.11+
+- **言語**: Python 3.11+ / Node.js 14+
 - **AI**: Google Gemini AI
 - **GUI**: Tkinter + Pygame
 - **画像処理**: OpenCV + PIL
 - **データベース**: SQLite
+- **LINE Bot**: Express + @line/bot-sdk
+- **クラウド連携**: Google Apps Script + Google Drive
 - **アーキテクチャ**: レイヤード・アーキテクチャ
 
 ## 🔧 開発者向け
@@ -179,11 +352,13 @@ AIは以下の観点でキャラクターを分析します：
 
 ## ✨ 今後の予定
 
+- [x] LINE Bot連携機能
 - [ ] Web版の開発
 - [ ] モバイルアプリ対応
 - [ ] オンライン対戦機能
 - [ ] 追加のAI分析モデル
 - [ ] キャラクター編集機能
+- [ ] LINE Botからの直接バトル機能
 
 ## 📞 サポート
 
