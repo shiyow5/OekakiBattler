@@ -452,15 +452,15 @@ class BattleEngine:
             # Determine attacker and defender with scaled positions
             if turn.attacker_id == char1.id:
                 attacker, defender = char1, char2
-                attacker_pos = (int(200 * scale_x), int(300 * scale_y))
-                defender_pos = (int((screen_width - 200 * scale_x)), int(300 * scale_y))
+                attacker_pos = (int(250 * scale_x), int(350 * scale_y))
+                defender_pos = (int((screen_width - 250 * scale_x)), int(350 * scale_y))
                 # Defender is char2
                 defender_hp_before = char2_hp
                 defender_hp_after = turn.defender_hp_after
             else:
                 attacker, defender = char2, char1
-                attacker_pos = (int((screen_width - 200 * scale_x)), int(300 * scale_y))
-                defender_pos = (int(200 * scale_x), int(300 * scale_y))
+                attacker_pos = (int((screen_width - 250 * scale_x)), int(350 * scale_y))
+                defender_pos = (int(250 * scale_x), int(350 * scale_y))
                 # Defender is char1
                 defender_hp_before = char1_hp
                 defender_hp_after = turn.defender_hp_after
@@ -594,18 +594,18 @@ class BattleEngine:
             shake_offset = self.effects.screen_offset if self.effects else [0, 0]
             self.screen.fill((240, 248, 255))
 
-            # Draw battle arena
+            # Draw battle arena (taller)
             arena_x = int(50 * scale_x) + shake_offset[0]
-            arena_y = int(100 * scale_y) + shake_offset[1]
+            arena_y = int(50 * scale_y) + shake_offset[1]
             arena_width = screen_width - int(100 * scale_x)
-            arena_height = int(400 * scale_y)
+            arena_height = int(550 * scale_y)  # Increased from 400 to 550
             arena_rect = pygame.Rect(arena_x, arena_y, arena_width, arena_height)
             pygame.draw.rect(self.screen, (200, 220, 200), arena_rect)
             pygame.draw.rect(self.screen, (100, 100, 100), arena_rect, int(3 * scale))
 
-            # Character positions with animation offsets
-            char1_base_pos = (int(200 * scale_x), int(300 * scale_y))
-            char2_base_pos = (int((screen_width - 200 * scale_x)), int(300 * scale_y))
+            # Character positions with animation offsets (adjusted for taller arena)
+            char1_base_pos = (int(250 * scale_x), int(350 * scale_y))
+            char2_base_pos = (int((screen_width - 250 * scale_x)), int(350 * scale_y))
 
             char1_offset = self.animator.get_offset(char1.id) if self.animator else (0, 0)
             char2_offset = self.animator.get_offset(char2.id) if self.animator else (0, 0)
@@ -626,11 +626,11 @@ class BattleEngine:
             # Draw HP bars
             self._draw_hp_bars(char1, char2, char1_pos, char2_pos, char1_hp, char2_hp, shake_offset, scale)
 
-            # Draw character names
+            # Draw character names (below the character images)
             name1_surface = self.font.render(char1.name, True, (0, 0, 0))
             name2_surface = self.font.render(char2.name, True, (0, 0, 0))
-            self.screen.blit(name1_surface, (char1_pos[0] - int(40 * scale), char1_pos[1] + int(70 * scale)))
-            self.screen.blit(name2_surface, (char2_pos[0] - int(40 * scale), char2_pos[1] + int(70 * scale)))
+            self.screen.blit(name1_surface, (char1_pos[0] - int(40 * scale), char1_pos[1] + int(170 * scale)))
+            self.screen.blit(name2_surface, (char2_pos[0] - int(40 * scale), char2_pos[1] + int(170 * scale)))
 
             # Draw effects
             if self.effects:
@@ -641,10 +641,10 @@ class BattleEngine:
                 defender_pos = char2_pos if current_turn.attacker_id == char1.id else char1_pos
                 self._draw_damage_text(current_turn, defender_pos, scale)
 
-            # Draw recent battle log
+            # Draw recent battle log (moved down to fit taller arena)
             if recent_logs:
-                log_start_y = int(520 * scale_y)
-                log_line_height = int(25 * scale_y)
+                log_start_y = int(620 * scale_y)  # Moved from 520 to 620
+                log_line_height = int(22 * scale_y)  # Slightly reduced from 25 to 22
                 for i, log_entry in enumerate(recent_logs):
                     log_surface = self.small_font.render(log_entry, True, (0, 0, 0))
                     self.screen.blit(log_surface, (int(50 * scale_x), log_start_y + i * log_line_height))
@@ -658,10 +658,11 @@ class BattleEngine:
     def _draw_hp_bars(self, char1: Character, char2: Character, char1_pos: Tuple[int, int], char2_pos: Tuple[int, int], char1_hp: int, char2_hp: int, shake_offset: List[int], scale: float = 1.0):
         """Draw HP bars for both characters"""
         try:
-            hp_bar_width = int(100 * scale)
-            hp_bar_height = int(20 * scale)
-            hp_bar_offset_x = int(50 * scale)
-            hp_bar_offset_y = int(80 * scale)
+            # Larger HP bars to match bigger characters
+            hp_bar_width = int(250 * scale)  # Increased to 250 for even longer bar
+            hp_bar_height = int(25 * scale)  # Increased from 20 to 25
+            hp_bar_offset_x = int(125 * scale)  # Increased to 125 to center the longer bar
+            hp_bar_offset_y = int(180 * scale)  # Increased from 80 to 180 for bigger characters
 
             # Calculate HP ratios
             char1_hp_ratio = max(0, char1_hp / char1.hp)
@@ -674,7 +675,7 @@ class BattleEngine:
 
             pygame.draw.rect(self.screen, (255, 255, 255), hp1_bar_rect)
             pygame.draw.rect(self.screen, (0, 255, 0), hp1_fill_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, max(1, int(2 * scale)))
+            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, max(1, int(3 * scale)))  # Thicker border
 
             # Character 2 HP bar
             hp2_bar_rect = pygame.Rect(char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_bar_offset_y, hp_bar_width, hp_bar_height)
@@ -683,14 +684,14 @@ class BattleEngine:
 
             pygame.draw.rect(self.screen, (255, 255, 255), hp2_bar_rect)
             pygame.draw.rect(self.screen, (0, 255, 0), hp2_fill_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, max(1, int(2 * scale)))
+            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, max(1, int(3 * scale)))  # Thicker border
 
-            # Draw HP text
+            # Draw HP text (using regular font for larger display)
             hp1_text = f"HP: {char1_hp}/{char1.hp}"
             hp2_text = f"HP: {char2_hp}/{char2.hp}"
-            hp1_surface = self.small_font.render(hp1_text, True, (0, 0, 0))
-            hp2_surface = self.small_font.render(hp2_text, True, (0, 0, 0))
-            hp_text_offset_y = int(100 * scale)
+            hp1_surface = self.font.render(hp1_text, True, (0, 0, 0))
+            hp2_surface = self.font.render(hp2_text, True, (0, 0, 0))
+            hp_text_offset_y = int(215 * scale)  # Increased from 205 to 215 to avoid overlap
             self.screen.blit(hp1_surface, (char1_pos[0] - hp_bar_offset_x, char1_pos[1] - hp_text_offset_y))
             self.screen.blit(hp2_surface, (char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_text_offset_y))
 
@@ -776,7 +777,7 @@ class BattleEngine:
     def _draw_character(self, character: Character, position: Tuple[int, int], current_hp: int, display_scale: float = 1.0):
         """Draw character with image or fallback to colored rectangle"""
         try:
-            max_width, max_height = int(120 * display_scale), int(120 * display_scale)  # Maximum display size
+            max_width, max_height = int(300 * display_scale), int(300 * display_scale)  # Maximum display size
 
             # Try to load and display character image
             character_sprite = self._load_character_sprite(character)

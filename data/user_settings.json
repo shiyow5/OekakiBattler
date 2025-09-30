@@ -1,5 +1,5 @@
 {
-  "battle_speed": 0.5,
+  "battle_speed": 0.2,
   "max_turns": 50,
   "critical_chance": 0.05,
   "screen_width": 1024,
