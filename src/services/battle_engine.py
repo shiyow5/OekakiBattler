@@ -55,10 +55,12 @@ class BattleEngine:
                     pass
             
             # Initialize Pygame if not already done
+            # Note: pygame.init() should be called on main thread (done in main.py for macOS 15+)
             if not pygame.get_init():
+                logger.warning("Pygame not initialized on main thread - attempting initialization")
                 pygame.init()
                 self.pygame_initialized = True
-                logger.info("Pygame initialized")
+                logger.info("Pygame initialized (fallback)")
             
             # Initialize audio and load default sounds
             audio_manager.create_default_sounds()

@@ -1,5 +1,49 @@
 # 変更履歴 (CHANGES.md)
 
+## 2025-10-01 (修正27): macOS 15+ クラッシュ対策
+
+### 変更内容
+macOS 15以降でPygameがクラッシュする問題を修正しました（Thread 13でのSIGTRAP）。
+
+**変更ファイル:**
+- `main.py` - Pygameをメインスレッドで初期化
+- `src/services/battle_engine.py` - 初期化ロジックに警告追加
+
+### 問題の原因
+- macOS 15.6.1でSDL2のキーボード初期化がサブスレッドから実行された
+- HIToolbox（Input Source管理）がメインスレッドからの呼び出しを要求
+- `dispatch_assert_queue`に違反して`SIGTRAP`発生
+
+### 解決策
+
+#### 1. 環境変数設定（main.py）
+```python
+os.environ['SDL_VIDEO_ALLOW_SCREENSAVER'] = '1'
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+```
+
+#### 2. メインスレッドで事前初期化（main.py）
+```python
+# Initialize Pygame on main thread (macOS 15+ requirement)
+import pygame
+if not pygame.get_init():
+    pygame.init()
+    logger.info("Pygame initialized on main thread")
+```
+
+#### 3. battle_engine.pyでフォールバック警告
+```python
+if not pygame.get_init():
+    logger.warning("Pygame not initialized on main thread - attempting initialization")
+```
+
+### 動作確認
+- ✅ Pygameがメインスレッドで初期化される
+- ✅ サブスレッドからの初期化を回避
+- ✅ macOS 15以降でクラッシュしない
+
+---
+
 ## 2025-09-30 (修正26): オンライン/オフラインモード自動切り替え機能
 
 ### 変更内容

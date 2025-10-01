@@ -4,10 +4,15 @@
 Main application entry point
 """
 
+import os
 import sys
 import tkinter as tk
 import logging
 from pathlib import Path
+
+# macOS 15+ fix: Force SDL2 video driver initialization on main thread
+os.environ['SDL_VIDEO_ALLOW_SCREENSAVER'] = '1'
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
 # Add src to path for imports
 sys.path.append(str(Path(__file__).parent / "src"))
@@ -48,6 +53,13 @@ def main():
         settings_manager.update_settings_class()
         settings_manager.apply_to_audio_manager(audio_manager)
         logger.info("Settings loaded and applied")
+
+        # Initialize Pygame on main thread (macOS 15+ requirement)
+        print("Initializing graphics system...")
+        import pygame
+        if not pygame.get_init():
+            pygame.init()
+            logger.info("Pygame initialized on main thread")
         
         # Check if API key is configured
         if not Settings.GOOGLE_API_KEY:
