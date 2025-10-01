@@ -34,7 +34,17 @@ if not pygame.get_init():
     logger.info("Pygame initialized after Tkinter setup")
 ```
 
-#### 3. battle_engine.pyでフォールバック警告
+#### 3. バトル実行をメインスレッドで実行（main_menu.py）
+`threading.Thread`から`root.after()`に変更：
+```python
+# Before (crashed on macOS 15+)
+threading.Thread(target=self._run_battle, args=(char1, char2, visual_mode), daemon=True).start()
+
+# After (works on macOS 15+)
+self.root.after(100, lambda: self._run_battle(char1, char2, visual_mode))
+```
+
+#### 4. battle_engine.pyでフォールバック警告
 ```python
 if not pygame.get_init():
     logger.warning("Pygame not initialized on main thread - attempting initialization")

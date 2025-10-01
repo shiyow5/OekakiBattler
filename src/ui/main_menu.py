@@ -489,13 +489,10 @@ class MainMenuWindow:
                 messagebox.showerror("Error", "Failed to find selected characters")
                 return
             
-            # Start battle in separate thread
+            # Start battle on main thread (macOS 15+ requirement for Pygame window creation)
             visual_mode = self.visual_mode_var.get()
-            threading.Thread(
-                target=self._run_battle,
-                args=(char1, char2, visual_mode),
-                daemon=True
-            ).start()
+            # Use after() to run on main thread without blocking
+            self.root.after(100, lambda: self._run_battle(char1, char2, visual_mode))
             
         except Exception as e:
             logger.error(f"Error starting battle: {e}")
