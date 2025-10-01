@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from src.services.sheets_manager import SheetsManager
 from src.services.database_manager import DatabaseManager
 from src.services.image_processor import ImageProcessor
 from src.services.ai_analyzer import AIAnalyzer
@@ -29,9 +30,19 @@ class MainMenuWindow:
         self.root.geometry("900x700")
         logger.info("MainMenuWindow.__init__: Basic window setup complete")
         
-        # Services
+        # Services - Try Google Sheets first, fallback to local database
         logger.info("MainMenuWindow.__init__: Initializing database manager")
-        self.db_manager = DatabaseManager()
+        sheets_manager = SheetsManager()
+
+        if sheets_manager.online_mode:
+            logger.info("MainMenuWindow.__init__: Using Google Sheets (online mode)")
+            self.db_manager = sheets_manager
+            self.online_mode = True
+        else:
+            logger.warning("MainMenuWindow.__init__: Google Sheets unavailable, using local database (offline mode)")
+            self.db_manager = DatabaseManager()
+            self.online_mode = False
+
         logger.info("MainMenuWindow.__init__: Initializing image processor")
         self.image_processor = ImageProcessor()
         logger.info("MainMenuWindow.__init__: Initializing AI analyzer")
@@ -57,7 +68,10 @@ class MainMenuWindow:
         
         # Status
         self.status_var = tk.StringVar()
-        self.status_var.set("Ready")
+        if self.online_mode:
+            self.status_var.set("Ready (Online Mode - Google Sheets)")
+        else:
+            self.status_var.set("Ready (Offline Mode - Local Database)")
         logger.info("MainMenuWindow.__init__: Data structures initialized")
         
         # Setup GUI
@@ -496,12 +510,52 @@ class MainMenuWindow:
             
             # Start battle
             battle = self.battle_engine.start_battle(char1, char2, visual_mode)
-            
+
             # Save battle to database
             if self.db_manager.save_battle(battle):
                 logger.info(f"Battle saved: {battle.id}")
             else:
                 logger.warning("Failed to save battle")
+
+            # Record battle history to Google Sheets (online mode only)
+            if self.online_mode:
+                winner_id = battle.winner_id if battle.winner_id else ""
+                winner_name = ""
+                if battle.winner_id == char1.id:
+                    winner_name = char1.name
+                elif battle.winner_id == char2.id:
+                    winner_name = char2.name
+                else:
+                    winner_name = "Draw"
+
+                battle_data = {
+                    'fighter1_id': char1.id,
+                    'fighter1_name': char1.name,
+                    'fighter2_id': char2.id,
+                    'fighter2_name': char2.name,
+                    'winner_id': winner_id,
+                    'winner_name': winner_name,
+                    'total_turns': len(battle.turns),
+                    'duration': battle.duration,
+                    'f1_final_hp': battle.char1_final_hp,
+                    'f2_final_hp': battle.char2_final_hp,
+                    'f1_damage_dealt': battle.char1_damage_dealt,
+                    'f2_damage_dealt': battle.char2_damage_dealt,
+                    'result_type': battle.result_type
+                }
+
+                if self.db_manager.record_battle_history(battle_data):
+                    logger.info("Battle history recorded to Google Sheets")
+                else:
+                    logger.warning("Failed to record battle history")
+
+                # Update rankings after battle
+                if self.db_manager.update_rankings():
+                    logger.info("Rankings updated successfully")
+                else:
+                    logger.warning("Failed to update rankings")
+            else:
+                logger.info("Offline mode: Battle history and rankings not recorded")
             
             # Update status
             winner_name = "Draw"

@@ -9,7 +9,17 @@ class Settings:
     # AI Settings
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     MODEL_NAME = os.getenv("MODEL_NAME", "gemini-2.5-flash-lite-preview-06-17")
-    
+
+    # Google Sheets Settings
+    SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+    WORKSHEET_NAME = os.getenv("WORKSHEET_NAME", "Characters")
+    BATTLE_HISTORY_SHEET = os.getenv("BATTLE_HISTORY_SHEET", "BattleHistory")
+    RANKING_SHEET = os.getenv("RANKING_SHEET", "Rankings")
+    GOOGLE_CREDENTIALS_PATH = Path(os.getenv("GOOGLE_CREDENTIALS_PATH", "credentials.json"))
+
+    # Google Drive Settings (optional - for organizing uploads in a specific folder)
+    DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")  # Optional: specify a folder ID to organize uploads
+
     # Image Processing
     MAX_IMAGE_SIZE = 600  # Maximum width or height while preserving aspect ratio
     SUPPORTED_FORMATS = [".png", ".jpg", ".jpeg", ".bmp"]

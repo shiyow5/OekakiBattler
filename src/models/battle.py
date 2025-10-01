@@ -23,6 +23,13 @@ class Battle(BaseModel):
     turns: List[BattleTurn] = Field(default_factory=list)
     duration: float = 0.0
     created_at: datetime = Field(default_factory=datetime.now)
+
+    # Battle statistics
+    char1_final_hp: int = 0
+    char2_final_hp: int = 0
+    char1_damage_dealt: int = 0
+    char2_damage_dealt: int = 0
+    result_type: str = "Unknown"  # "KO", "Time Limit", "Draw"
     
     @property
     def is_finished(self) -> bool:
