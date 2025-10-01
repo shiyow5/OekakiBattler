@@ -24,12 +24,18 @@ class MainMenuWindow:
     
     def __init__(self, root: tk.Tk):
         logger.info("MainMenuWindow.__init__: Starting initialization")
-        
+
         self.root = root
         self.root.title("お絵描きバトラー - Oekaki Battler")
         self.root.geometry("900x700")
         logger.info("MainMenuWindow.__init__: Basic window setup complete")
-        
+
+        # Initialize Pygame after Tkinter is set up (macOS 15+ requirement)
+        import pygame
+        if not pygame.get_init():
+            pygame.init()
+            logger.info("Pygame initialized after Tkinter setup")
+
         # Services - Try Google Sheets first, fallback to local database
         logger.info("MainMenuWindow.__init__: Initializing database manager")
         sheets_manager = SheetsManager()

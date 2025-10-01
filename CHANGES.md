@@ -6,29 +6,32 @@
 macOS 15以降でPygameがクラッシュする問題を修正しました（Thread 13でのSIGTRAP）。
 
 **変更ファイル:**
-- `main.py` - Pygameをメインスレッドで初期化
+- `main.py` - macOS用cocoaドライバ設定
+- `src/ui/main_menu.py` - Tkinterウィンドウセットアップ後にPygame初期化
 - `src/services/battle_engine.py` - 初期化ロジックに警告追加
 
 ### 問題の原因
-- macOS 15.6.1でSDL2のキーボード初期化がサブスレッドから実行された
-- HIToolbox（Input Source管理）がメインスレッドからの呼び出しを要求
-- `dispatch_assert_queue`に違反して`SIGTRAP`発生
+1. **Thread 13でのSIGTRAP**: macOS 15.6.1でSDL2のキーボード初期化がサブスレッドから実行され、HIToolboxの`dispatch_assert_queue`に違反
+2. **TkinterとPygameの競合**: 両方を同時に初期化するとSDLApplicationとTkinterのmacOS統合が衝突し`NSInvalidArgumentException`発生
 
 ### 解決策
 
-#### 1. 環境変数設定（main.py）
+#### 1. macOS用ドライバ設定（main.py）
 ```python
-os.environ['SDL_VIDEO_ALLOW_SCREENSAVER'] = '1'
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+# Use cocoa driver on macOS (required for macOS 15+)
+import platform
+if platform.system() == 'Darwin':  # macOS
+    os.environ['SDL_VIDEODRIVER'] = 'cocoa'
 ```
 
-#### 2. メインスレッドで事前初期化（main.py）
+#### 2. 初期化順序の調整（main_menu.py）
+Tkinterのウィンドウセットアップ**後**にPygameを初期化：
 ```python
-# Initialize Pygame on main thread (macOS 15+ requirement)
+# Initialize Pygame after Tkinter is set up (macOS 15+ requirement)
 import pygame
 if not pygame.get_init():
     pygame.init()
-    logger.info("Pygame initialized on main thread")
+    logger.info("Pygame initialized after Tkinter setup")
 ```
 
 #### 3. battle_engine.pyでフォールバック警告

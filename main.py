@@ -58,13 +58,6 @@ def main():
         settings_manager.update_settings_class()
         settings_manager.apply_to_audio_manager(audio_manager)
         logger.info("Settings loaded and applied")
-
-        # Initialize Pygame on main thread (macOS 15+ requirement)
-        print("Initializing graphics system...")
-        import pygame
-        if not pygame.get_init():
-            pygame.init()
-            logger.info("Pygame initialized on main thread")
         
         # Check if API key is configured
         if not Settings.GOOGLE_API_KEY:
