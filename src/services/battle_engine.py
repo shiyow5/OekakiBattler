@@ -240,7 +240,25 @@ class BattleEngine:
                 
                 turn_number += 1
             
-            # Determine winner
+            # Calculate battle statistics
+            battle.char1_final_hp = char1_current_hp
+            battle.char2_final_hp = char2_current_hp
+
+            # Calculate total damage dealt by each character
+            for turn in battle.turns:
+                if turn.attacker_id == char1.id:
+                    battle.char1_damage_dealt += turn.damage
+                elif turn.attacker_id == char2.id:
+                    battle.char2_damage_dealt += turn.damage
+
+            # Determine winner and result type
+            if char1_current_hp <= 0 or char2_current_hp <= 0:
+                battle.result_type = "KO"
+            elif turn_number > self.max_turns:
+                battle.result_type = "Time Limit"
+            else:
+                battle.result_type = "Draw"
+
             if char1_current_hp > char2_current_hp:
                 battle.winner_id = char1.id
                 winner_name = char1.name
@@ -250,7 +268,8 @@ class BattleEngine:
             else:
                 battle.winner_id = None
                 winner_name = "Draw"
-            
+                battle.result_type = "Draw"
+
             # Calculate battle duration
             battle.duration = time.time() - start_time
             

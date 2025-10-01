@@ -15,7 +15,7 @@
 - ⚔️ **自動バトルシステム**: Pygameベースのリアルタイム戦闘表示
 - 📊 **詳細統計管理**: 戦績、勝率、キャラクター性能の追跡
 - 🎲 **ランダムマッチ**: 自動でキャラクターをマッチング
-- 💾 **データ永続化**: SQLiteによる確実なデータ保存
+- 💾 **データ永続化**: Google Spreadsheetsによるクラウドベースのデータ管理
 - 📱 **LINE Bot連携**: LINEから画像を送信してキャラクター登録・Google Drive保存
 
 ## 🚀 クイックスタート
@@ -47,14 +47,70 @@ source .venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 ```
 
-4. **環境変数を設定**
+4. **Google Sheets APIを設定**
+
+Google Spreadsheetsを使用するため、Google Cloud Platformでの設定が必要です：
+
+##### 4-1. Google Cloud Projectの作成
+
+1. [Google Cloud Console](https://console.cloud.google.com/) にアクセス
+2. 新しいプロジェクトを作成（例：「OekakiBattler」）
+3. プロジェクトを選択
+
+##### 4-2. Google Sheets APIの有効化
+
+1. 「APIとサービス」→「ライブラリ」に移動
+2. 「Google Sheets API」を検索して有効化
+3. 「Google Drive API」も同様に有効化
+
+##### 4-3. サービスアカウントの作成
+
+1. 「APIとサービス」→「認証情報」に移動
+2. 「認証情報を作成」→「サービスアカウント」を選択
+3. サービスアカウント名を入力（例：「oekaki-battler-sheets」）
+4. 作成完了後、サービスアカウントをクリック
+5. 「キー」タブ→「鍵を追加」→「新しい鍵を作成」
+6. JSONキーをダウンロード
+7. ダウンロードしたJSONファイルをプロジェクトルートに`credentials.json`として配置
+
+##### 4-4. Google Driveフォルダの作成（オプション）
+
+画像を整理するための専用フォルダを作成できます：
+
+1. [Google Drive](https://drive.google.com/)で新しいフォルダを作成（例：「OekakiBattler Images」）
+2. フォルダを開き、URLからフォルダIDをコピー
+   - URL: `https://drive.google.com/drive/folders/【ここがフォルダID】`
+3. フォルダを「共有」→サービスアカウントのメールアドレスを追加（編集者権限）
+
+**注意**: フォルダIDを指定しない場合、画像はDriveのルートにアップロードされます。
+
+##### 4-5. Google Spreadsheetの作成
+
+1. [Google Sheets](https://sheets.google.com/)で新しいスプレッドシートを作成
+2. スプレッドシート名を「OekakiBattler Characters」などに設定
+3. URLから**スプレッドシートID**をコピー
+   - URL: `https://docs.google.com/spreadsheets/d/【ここがスプレッドシートID】/edit`
+4. スプレッドシートを開き、「共有」をクリック
+5. 先ほど作成したサービスアカウントのメールアドレス（`xxxxx@xxxxxx.iam.gserviceaccount.com`）を追加
+6. 権限を「編集者」に設定して共有
+
+##### 4-6. 環境変数を設定
 
 メインアプリケーション用の`.env`ファイルを作成：
 ```bash
 # メインアプリケーション用の環境変数
 echo "GOOGLE_API_KEY=your_google_api_key_here" > .env
 echo "MODEL_NAME=gemini-2.5-flash-lite-preview-06-17" >> .env
+echo "SPREADSHEET_ID=your_spreadsheet_id_here" >> .env
+echo "WORKSHEET_NAME=Characters" >> .env
+echo "GOOGLE_CREDENTIALS_PATH=credentials.json" >> .env
+echo "DRIVE_FOLDER_ID=your_drive_folder_id_here" >> .env  # オプション
 ```
+
+**重要**: 実際の値に置き換えてください：
+- `your_google_api_key_here`: [Google AI Studio](https://aistudio.google.com/app/apikey)で取得したAPIキー
+- `your_spreadsheet_id_here`: 上記で作成したスプレッドシートのID
+- `your_drive_folder_id_here`: （オプション）Google Driveフォルダのid（指定すると画像が整理される）
 
 LINE Bot機能を使用する場合は、`server/.env`ファイルも作成：
 ```bash
@@ -80,6 +136,132 @@ EOF
 ```bash
 python main.py
 ```
+
+### オンライン/オフラインモードの自動切り替え
+
+アプリケーションは起動時にGoogle Sheets/Driveへの接続を試みます：
+
+**オンラインモード（Google Sheets利用可能）:**
+- Google Spreadsheetsでキャラクターデータを管理
+- Google Driveに画像を自動アップロード
+- バトル履歴を記録
+- ランキングを自動更新
+- ステータスバーに「Online Mode - Google Sheets」と表示
+
+**オフラインモード（接続失敗時の自動フォールバック）:**
+- ローカルSQLiteデータベースを使用
+- 画像はローカル保存のみ
+- バトル履歴・ランキング機能は無効
+- ステータスバーに「Offline Mode - Local Database」と表示
+
+**接続失敗の理由:**
+- インターネット接続がない
+- credentials.jsonが設定されていない
+- Google Sheets/Drive APIが有効化されていない
+- スプレッドシートが共有されていない
+- 環境変数（SPREADSHEET_ID）が未設定
+
+**注意:** オフラインモードでもキャラクター登録・編集・バトルは正常に動作します。Google Sheets固有の機能（履歴記録・ランキング）のみが無効になります。
+
+### Google Spreadsheet構造
+
+アプリケーションが自動的に3つのワークシートを作成します：
+
+#### 1. Characters（キャラクターデータ）
+
+| 列 | 項目 | 説明 |
+|---|---|---|
+| A | ID | キャラクターの一意識別子（自動採番） |
+| B | Name | キャラクター名 |
+| C | Image URL | 元画像のURL（Google Driveなど） |
+| D | Sprite URL | 処理済みスプライトのURL |
+| E | HP | 体力値（50-150） |
+| F | Attack | 攻撃力（30-120） |
+| G | Defense | 防御力（20-100） |
+| H | Speed | 素早さ（40-130） |
+| I | Magic | 魔法力（10-100） |
+| J | Description | キャラクター説明 |
+| K | Created At | 作成日時（ISO形式） |
+| L | Wins | 勝利数 |
+| M | Losses | 敗北数 |
+| N | Draws | 引き分け数 |
+
+#### 2. BattleHistory（バトル履歴）
+
+バトル終了後に自動的に記録されます：
+
+| 列 | 項目 | 説明 |
+|---|---|---|
+| A | Battle ID | バトルの一意識別子 |
+| B | Date | バトル実施日時 |
+| C | Fighter 1 ID | ファイター1のID |
+| D | Fighter 1 Name | ファイター1の名前 |
+| E | Fighter 2 ID | ファイター2のID |
+| F | Fighter 2 Name | ファイター2の名前 |
+| G | Winner ID | 勝者のID |
+| H | Winner Name | 勝者の名前 |
+| I | Total Turns | 総ターン数 |
+| J | Duration (s) | バトル時間（秒） |
+| K | F1 Final HP | ファイター1の最終HP |
+| L | F2 Final HP | ファイター2の最終HP |
+| M | F1 Damage Dealt | ファイター1の与ダメージ |
+| N | F2 Damage Dealt | ファイター2の与ダメージ |
+| O | Result Type | 決着タイプ（KO/Time Limit/Draw） |
+
+#### 3. Rankings（ランキング）
+
+バトル終了後に自動更新されます：
+
+| 列 | 項目 | 説明 |
+|---|---|---|
+| A | Rank | 順位 |
+| B | Character ID | キャラクターID |
+| C | Character Name | キャラクター名 |
+| D | Total Battles | 総バトル数 |
+| E | Wins | 勝利数 |
+| F | Losses | 敗北数 |
+| G | Draws | 引き分け数 |
+| H | Win Rate (%) | 勝率（%） |
+| I | Avg Damage Dealt | 平均与ダメージ |
+| J | Rating | レーティング（勝利×3＋引き分け） |
+
+**注意**:
+- 初回起動時にヘッダーが自動生成されます
+- Image URLとSprite URLは自動的にGoogle Drive URLとして保存されます
+- キャラクター読み込み時にURLから画像を自動ダウンロード・キャッシュします
+- 手動でスプレッドシートを編集する場合は、データ形式に注意してください
+
+### Google Drive連携の動作
+
+#### キャラクター登録時
+1. ローカルの画像ファイル（元画像・スプライト）をGoogle Driveにアップロード
+2. 公開URLを取得
+3. URLをスプレッドシートのImage URL / Sprite URL列に記録
+4. ローカルファイルは削除されずそのまま保持
+
+#### キャラクター読み込み時
+1. スプレッドシートからURLを取得
+2. URLがhttp/httpsで始まる場合、自動的にダウンロード
+3. `data/characters/char_{ID}_original.png`にキャッシュ
+4. `data/sprites/char_{ID}_sprite.png`にキャッシュ
+5. 以降はキャッシュから読み込み（再ダウンロード不要）
+
+#### バトル終了後の自動処理
+1. **バトル履歴の記録**: BattleHistoryシートにバトル結果を詳細記録
+   - 対戦カード、勝者、ターン数、時間、最終HP、与ダメージなど
+2. **ランキングの自動更新**: Rankingsシートを最新の戦績で更新
+   - 勝率、平均与ダメージ、レーティングを自動計算
+   - レーティング順にソート
+
+#### 利点
+- ✅ クラウドに画像を保存、どこからでもアクセス可能
+- ✅ 複数デバイス間で画像を共有
+- ✅ ローカルストレージの節約
+- ✅ バックアップが自動的に保管される
+- ✅ スプレッドシートから画像URLを直接確認可能
+- ✅ バトル履歴を永続的に記録・分析可能
+- ✅ リアルタイムのランキング自動更新
+- ✅ スプレッドシートでデータの可視化・分析が容易
 
 ## 📱 LINE Bot機能
 
@@ -213,6 +395,10 @@ chmod +x server_up.sh
 1. **`.env`** (ルートディレクトリ): メインアプリケーション用
    - `GOOGLE_API_KEY`: Google AI APIキー
    - `MODEL_NAME`: 使用するAIモデル名
+   - `SPREADSHEET_ID`: Google SpreadsheetsのスプレッドシートID
+   - `WORKSHEET_NAME`: ワークシート名（デフォルト: "Characters"）
+   - `GOOGLE_CREDENTIALS_PATH`: サービスアカウントJSONファイルのパス
+   - `DRIVE_FOLDER_ID`: Google Driveフォルダid（オプション）
 
 2. **`server/.env`** (serverディレクトリ): LINE Bot機能用
    - `PORT`: サーバーポート番号
@@ -221,7 +407,7 @@ chmod +x server_up.sh
    - `GAS_WEBHOOK_URL`: Google Apps ScriptのWebアプリURL
    - `SHARED_SECRET`: GAS認証用シークレット
 
-**注意**: これらのファイルは機密情報を含むため、`.gitignore`に追加されており、Gitにコミットされません。
+**注意**: これらのファイルは機密情報を含むため、`.gitignore`に追加されており、Gitにコミットされません。`credentials.json`も同様にGitから除外されています。
 
 ## 📖 使い方
 
@@ -262,10 +448,11 @@ OekakiBattler/
 │   │   ├── image_processor.py    # 画像処理
 │   │   ├── ai_analyzer.py        # AI分析
 │   │   ├── battle_engine.py      # バトルエンジン
-│   │   └── database_manager.py   # データベース管理
+│   │   └── sheets_manager.py     # Google Sheets管理
 │   ├── ui/                 # ユーザーインターフェース
 │   │   └── main_menu.py    # メインGUI
 │   └── utils/              # ユーティリティ
+├── credentials.json        # Google サービスアカウント認証情報（要作成）
 ├── server/                 # LINE Botサーバー
 │   ├── server.js           # Node.jsサーバー
 │   └── .env                # 環境変数設定
@@ -277,8 +464,7 @@ OekakiBattler/
 │   └── sounds/            # サウンドファイル
 ├── data/                   # データファイル
 │   ├── characters/         # 元画像
-│   ├── sprites/           # 処理済みスプライト
-│   └── database.db        # SQLiteデータベース
+│   └── sprites/           # 処理済みスプライト
 ├── docs/                   # ドキュメント
 │   ├── USER_MANUAL.md      # ユーザーマニュアル
 │   └── API_REFERENCE.md    # API仕様書
@@ -323,7 +509,7 @@ AIは以下の観点でキャラクターを分析します：
 - **AI**: Google Gemini AI
 - **GUI**: Tkinter + Pygame
 - **画像処理**: OpenCV + PIL
-- **データベース**: SQLite
+- **データ管理**: Google Spreadsheets (gspread)
 - **LINE Bot**: Express + @line/bot-sdk
 - **クラウド連携**: Google Apps Script + Google Drive
 - **アーキテクチャ**: レイヤード・アーキテクチャ
@@ -354,7 +540,33 @@ AIは以下の観点でキャラクターを分析します：
 
 ## 🐛 トラブルシューティング
 
-よくある問題と解決法は [USER_MANUAL.md](docs/USER_MANUAL.md#トラブルシューティング) をご確認ください。
+### Google Sheets関連
+
+**問題**: `FileNotFoundError: Please place your Google credentials JSON file`
+- **原因**: サービスアカウントのJSONファイルが見つからない
+- **解決**: `credentials.json`をプロジェクトルートに配置し、`.env`の`GOOGLE_CREDENTIALS_PATH`が正しいか確認
+
+**問題**: `gspread.exceptions.APIError: PERMISSION_DENIED`
+- **原因**: スプレッドシートがサービスアカウントと共有されていない
+- **解決**: スプレッドシートの「共有」からサービスアカウントのメールアドレスを追加（編集者権限）
+
+**問題**: `gspread.exceptions.SpreadsheetNotFound`
+- **原因**: スプレッドシートIDが間違っているか、アクセス権限がない
+- **解決**: `.env`の`SPREADSHEET_ID`を確認し、スプレッドシートのURLからIDをコピー
+
+**問題**: APIクォータ超過エラー
+- **原因**: Google Sheets APIの利用制限に達した
+- **解決**: リクエスト頻度を減らす、またはGoogle Cloud Consoleでクォータ増加をリクエスト
+
+**問題**: 画像アップロードが失敗する
+- **原因**: Google Drive APIが有効化されていない、またはサービスアカウントの権限不足
+- **解決**: Google Drive APIを有効化し、Driveフォルダをサービスアカウントと共有（編集者権限）
+
+**問題**: 画像ダウンロードが失敗する
+- **原因**: Google DriveのURLがprivateになっている、またはネットワーク接続の問題
+- **解決**: ファイルの共有設定を確認（リンクを知っている全員が閲覧可）、インターネット接続を確認
+
+その他の問題と解決法は [USER_MANUAL.md](docs/USER_MANUAL.md#トラブルシューティング) をご確認ください。
 
 ## 📄 ライセンス
 
