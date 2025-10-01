@@ -13,7 +13,11 @@ from pathlib import Path
 # macOS 15+ fix: Force SDL2 video driver initialization on main thread
 os.environ['SDL_VIDEO_ALLOW_SCREENSAVER'] = '1'
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
-os.environ['SDL_VIDEODRIVER'] = 'x11'
+
+# Use cocoa driver on macOS (required for macOS 15+)
+import platform
+if platform.system() == 'Darwin':  # macOS
+    os.environ['SDL_VIDEODRIVER'] = 'cocoa'
 
 # Add src to path for imports
 sys.path.append(str(Path(__file__).parent / "src"))
