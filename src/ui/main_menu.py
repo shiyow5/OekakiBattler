@@ -544,7 +544,8 @@ class MainMenuWindow:
                     'f2_final_hp': battle.char2_final_hp,
                     'f1_damage_dealt': battle.char1_damage_dealt,
                     'f2_damage_dealt': battle.char2_damage_dealt,
-                    'result_type': battle.result_type
+                    'result_type': battle.result_type,
+                    'battle_log': battle.battle_log  # Add battle log
                 }
 
                 if self.db_manager.record_battle_history(battle_data):
@@ -581,9 +582,10 @@ class MainMenuWindow:
             ))
             
         except Exception as e:
-            logger.error(f"Error running battle: {e}")
-            self.status_var.set(f"Battle error: {e}")
-            self.root.after(500, lambda: messagebox.showerror("Battle Error", str(e)))
+            error_msg = str(e)
+            logger.error(f"Error running battle: {error_msg}")
+            self.status_var.set(f"Battle error: {error_msg}")
+            self.root.after(500, lambda msg=error_msg: messagebox.showerror("Battle Error", msg))
         finally:
             # Re-enable controls after battle
             pass
@@ -998,7 +1000,8 @@ class CharacterRegistrationDialog:
                         self.dialog.after(0, lambda: messagebox.showerror("Error", "Failed to save character"))
                         
                 except Exception as e:
-                    self.dialog.after(0, lambda: messagebox.showerror("Error", f"Registration failed: {e}"))
+                    error_msg = f"Registration failed: {e}"
+                    self.dialog.after(0, lambda msg=error_msg: messagebox.showerror("Error", msg))
                 finally:
                     self.dialog.after(0, lambda: self._reset_cursor())
             

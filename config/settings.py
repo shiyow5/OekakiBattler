@@ -20,6 +20,10 @@ class Settings:
     # Google Drive Settings (optional - for organizing uploads in a specific folder)
     DRIVE_FOLDER_ID = os.getenv("DRIVE_FOLDER_ID")  # Optional: specify a folder ID to organize uploads
 
+    # Google Apps Script Settings (for uploading via GAS to use user's storage quota)
+    GAS_WEBHOOK_URL = os.getenv("GAS_WEBHOOK_URL")  # Google Apps Script Web App URL
+    GAS_SHARED_SECRET = os.getenv("SHARED_SECRET", "oekaki_battler_line_to_gas_secret_shiyow5")  # Secret for GAS authentication
+
     # Image Processing
     MAX_IMAGE_SIZE = 600  # Maximum width or height while preserving aspect ratio
     SUPPORTED_FORMATS = [".png", ".jpg", ".jpeg", ".bmp"]

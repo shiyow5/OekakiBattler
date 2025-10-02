@@ -562,6 +562,71 @@ AIは以下の観点でキャラクターを分析します：
 - **原因**: Google Drive APIが有効化されていない、またはサービスアカウントの権限不足
 - **解決**: Google Drive APIを有効化し、Driveフォルダをサービスアカウントと共有（編集者権限）
 
+**問題**: `storageQuotaExceeded` エラーが発生する
+- **エラー内容**: `Service Accounts do not have storage quota`
+- **原因**: サービスアカウントがファイルを作成すると、サービスアカウント自身が所有者になりますが、サービスアカウントには独自のストレージ容量が割り当てられていません
+- **解決方法（3つの選択肢）**:
+
+  **方法1: 共有ドライブを使用【推奨・Google Workspaceユーザー向け】**
+  1. Google Workspace管理者として[Google Drive](https://drive.google.com/)にアクセス
+  2. 左メニューの「共有ドライブ」→「新規」をクリック
+  3. 名前を入力（例: "OekakiBattler"）して作成
+  4. 共有ドライブを開き、新しいフォルダを作成（例: "Images"）
+  5. フォルダを右クリック→「共有」→サービスアカウントのメールアドレスを追加（コンテンツ管理者権限）
+  6. フォルダのURLから共有ドライブのフォルダIDをコピー
+  7. `.env`ファイルの`DRIVE_FOLDER_ID`を共有ドライブのフォルダIDに更新
+
+  **方法2: Google Apps Scriptを使用【個人アカウント向け・推奨】**
+
+  既存のLINE Bot用Google Apps Scriptを利用して、あなたのアカウントのストレージに画像を保存できます。
+
+  1. **Google Apps Scriptのデプロイ**
+     - [Google Apps Script](https://script.google.com/)にアクセス
+     - 新しいプロジェクトを作成（または既存のLINE Bot用プロジェクトを使用）
+     - `server/googlesheet_apps_script_updated.js`の内容をコピー＆ペースト
+     - スクリプト内の以下を設定:
+       ```javascript
+       var SHARED_SECRET = 'oekaki_battler_line_to_gas_secret_shiyow5'; // シークレット
+       var folderId = '1JT7QnTcSrLo2AC4p580V7fa_MScuVd4G'; // あなたのDriveフォルダID
+       ```
+     - 「デプロイ」→「新しいデプロイ」→「ウェブアプリ」を選択
+     - 「次のユーザーとして実行」→「自分」を選択
+     - 「アクセスできるユーザー」→「全員」を選択
+     - デプロイ後、ウェブアプリのURLをコピー
+
+  2. **環境変数を設定**
+     `.env`ファイルに以下を追加:
+     ```bash
+     GAS_WEBHOOK_URL="https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec"
+     SHARED_SECRET="oekaki_battler_line_to_gas_secret_shiyow5"
+     ```
+
+  3. アプリケーションを再起動
+
+  **メリット**:
+  - あなたのアカウントのストレージを使用（容量エラーなし）
+  - 設定が簡単
+  - LINE BotとPythonアプリの両方で使用可能
+
+  **デメリット**:
+  - GASのリクエスト制限あり（1日20,000回）
+
+  **方法3: ローカルストレージのみ使用**
+  1. `.env`ファイルから`DRIVE_FOLDER_ID`と`GAS_WEBHOOK_URL`の行を削除:
+     ```bash
+     # DRIVE_FOLDER_ID="..."  # コメントアウト
+     # GAS_WEBHOOK_URL="..."  # コメントアウト
+     ```
+  2. アプリケーションを再起動
+  3. 画像はローカル（`data/characters/`と`data/sprites/`）にのみ保存されます
+
+  **方法4: OAuth 2.0認証を使用【上級者向け】**
+  - サービスアカウントの代わりにOAuth 2.0ユーザー認証を使用
+  - 実装には`google-auth-oauthlib`と認証フローの変更が必要
+  - 詳細は[Google Drive API OAuth 2.0ドキュメント](https://developers.google.com/drive/api/guides/about-auth)を参照
+
+- **現在の動作**: 画像アップロードが失敗しても、ローカルパスでスプレッドシートに保存され、機能は継続します
+
 **問題**: 画像ダウンロードが失敗する
 - **原因**: Google DriveのURLがprivateになっている、またはネットワーク接続の問題
 - **解決**: ファイルの共有設定を確認（リンクを知っている全員が閲覧可）、インターネット接続を確認

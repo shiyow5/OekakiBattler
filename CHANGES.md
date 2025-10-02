@@ -1,5 +1,290 @@
 # 変更履歴 (CHANGES.md)
 
+## 2025-10-02 (修正30): SheetsManager完全互換性対応とバトルログ保存機能追加
+
+### 変更内容
+SheetsManagerとDatabaseManagerの完全な互換性を実現し、バトルログのGoogle Sheets保存機能を追加しました。また、バトル履歴表示機能を完全に動作させるための修正を行いました。
+
+**変更ファイル:**
+- `src/services/sheets_manager.py` - 欠落メソッドの実装、バトルログ保存対応
+- `src/ui/main_menu.py` - バトルログをbattle_dataに追加
+
+### 主な機能追加・修正
+
+#### 1. update_rankingsメソッドの修正
+Characterモデルの`battle_count`/`win_count`属性に対応：
+```python
+# 変更前
+total_battles = char.wins + char.losses + char.draws
+win_rate = (char.wins / total_battles * 100)
+
+# 変更後
+total_battles = char.battle_count
+wins = char.win_count
+losses = char.battle_count - char.win_count
+win_rate = (wins / total_battles * 100)
+```
+
+#### 2. 欠落メソッドの追加
+
+**`get_recent_battles(limit: int)`**
+- バトル履歴からBattleオブジェクトを構築
+- UI表示用に完全なBattle互換オブジェクトを返す
+- バトルログも含めて復元
+
+**`get_statistics()`**
+- キャラクター総数、バトル総数
+- 平均ステータス（HP、攻撃、防御、速度、魔法）
+- 勝率上位5キャラクター
+
+#### 3. get_character()のID型対応
+文字列または整数のIDを受け付けるように改善：
+```python
+def get_character(self, character_id) -> Optional[Character]:
+    # 文字列IDを整数に自動変換
+    char_id = int(character_id) if isinstance(character_id, str) else character_id
+```
+
+#### 4. バトルログ保存機能の追加
+
+**Battle History シートのヘッダー拡張:**
+```python
+# 15列 → 16列に拡張
+expected_headers = [
+    'Battle ID', 'Date', 'Fighter 1 ID', 'Fighter 1 Name', 'Fighter 2 ID', 'Fighter 2 Name',
+    'Winner ID', 'Winner Name', 'Total Turns', 'Duration (s)',
+    'F1 Final HP', 'F2 Final HP', 'F1 Damage Dealt', 'F2 Damage Dealt',
+    'Result Type', 'Battle Log'  # ← 新規追加
+]
+```
+
+**バトルログの保存:**
+```python
+# バトルログを改行で結合して保存
+battle_log = battle_data.get('battle_log', [])
+battle_log_str = '\n'.join(battle_log) if battle_log else ''
+row.append(battle_log_str)
+```
+
+**バトルログの読み込み:**
+```python
+# 改行で分割してリストに復元
+battle_log_str = record.get('Battle Log', '')
+battle_log = battle_log_str.split('\n') if battle_log_str else []
+```
+
+#### 5. 不要な警告の抑制機能強化
+`get_character_by_name(silent=True)`パラメータ追加で、新規登録時の警告を抑制
+
+### データフロー
+
+1. **バトル実行** → `battle.battle_log`にログ蓄積
+2. **履歴記録** → `record_battle_history()`で改行区切り文字列としてシートに保存
+3. **履歴読込** → `get_recent_battles()`で改行分割してリスト復元
+4. **UI表示** → バトル詳細画面でログ表示
+
+### テスト結果
+
+- ✅ ランキング更新が正常動作
+- ✅ バトル履歴が正しく表示
+- ✅ キャラクター検索で文字列/整数ID両対応
+- ✅ バトルログがGoogle Sheetsに保存され、読み込み可能
+- ✅ 統計情報の表示が正常動作
+- ✅ 「Character not found」警告が適切に抑制
+
+### データベース互換性
+
+SheetsManagerがDatabaseManagerと完全に同じインターフェースを持つようになりました：
+- `save_character()`
+- `get_character()`
+- `get_character_by_name()`
+- `save_battle()`
+- `get_recent_battles()`
+- `get_statistics()`
+- `record_battle_history()`
+- `update_rankings()`
+
+これにより、オンライン/オフラインモードの切り替えが完全にシームレスになりました。
+
+---
+
+## 2025-10-02 (修正29): Google Apps Script連携によるDrive容量問題の解決
+
+### 変更内容
+Google Drive容量エラーを解決するため、Google Apps Script (GAS) 経由での画像アップロード機能を実装しました。これにより、サービスアカウントのストレージではなく、ユーザーのGoogleアカウントストレージを使用できるようになりました。
+
+**変更ファイル:**
+- `config/settings.py` - GAS関連の環境変数を追加
+- `src/services/sheets_manager.py` - GAS経由アップロード機能の実装、save_battleメソッド追加、警告抑制機能追加
+- `src/ui/main_menu.py` - バトルエラーハンドリングのスコープ問題修正
+- `server/googlesheet_apps_script_updated.js` - LINE BotとPythonアプリ両対応のGASコード
+- `README.md` - GAS設定手順を含むトラブルシューティング拡充
+
+### 主な機能追加
+
+#### 1. Google Apps Script経由の画像アップロード
+```python
+def upload_to_drive_via_gas(self, file_path: str, file_name: str = None) -> Optional[str]:
+    """Upload via GAS (uses user's storage quota)"""
+    # Base64エンコード → GASにPOST → ユーザーのDriveに保存
+    payload = {
+        'secret': Settings.GAS_SHARED_SECRET,
+        'image': b64_data,
+        'mimeType': mime_type,
+        'filename': file_name,
+        'source': 'python_app'
+    }
+    response = requests.post(Settings.GAS_WEBHOOK_URL, json=payload)
+```
+
+**アップロード優先順位:**
+1. GAS経由アップロード（ユーザーストレージ使用）← **推奨**
+2. Direct API（サービスアカウント - 容量エラーの可能性あり）
+3. ローカル保存のみ（フォールバック）
+
+#### 2. save_battleメソッドの追加
+DatabaseManagerとのインターフェース互換性のため追加：
+```python
+def save_battle(self, battle: Battle) -> bool:
+    """Battle保存（record_battle_history経由）"""
+    # SheetsManagerではrecord_battle_history()を使用
+    # このメソッドは互換性のためのラッパー
+    return True
+```
+
+#### 3. 不要な警告の抑制
+新規キャラクター登録時の"Character not found"警告を抑制：
+```python
+def get_character_by_name(self, name: str, silent: bool = False):
+    """silent=Trueで警告を抑制"""
+    if not silent:
+        logger.warning(f"Character not found: {name}")
+```
+
+### 環境変数の追加
+
+`.env`ファイルに以下を追加：
+```bash
+GAS_WEBHOOK_URL=https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec
+SHARED_SECRET=oekaki_battler_line_to_gas_secret_shiyow5
+```
+
+### Google Apps Script設定手順
+
+1. https://script.google.com/ でプロジェクト作成
+2. `server/googlesheet_apps_script_updated.js`をコピー＆ペースト
+3. 「デプロイ」→「ウェブアプリ」として公開
+   - 実行ユーザー: 自分
+   - アクセス: 全員
+4. デプロイURLを`.env`の`GAS_WEBHOOK_URL`に設定
+
+### メリット
+
+- ✅ **容量エラー解決**: ユーザーのGoogleアカウントストレージを使用
+- ✅ **既存資産活用**: LINE Bot用GASコードを再利用
+- ✅ **簡単設定**: 環境変数追加のみ
+- ✅ **後方互換性**: GAS未設定でも動作継続
+- ✅ **統合管理**: LINE BotとPythonアプリで同じGAS使用
+
+### 制限事項
+
+- GASリクエスト制限: 20,000回/日
+- GAS実行時間制限: 6分/リクエスト（通常は数秒で完了）
+
+### テスト結果
+
+- ✅ GAS経由での画像アップロード成功
+- ✅ ユーザーストレージ使用により容量エラー解消
+- ✅ バトル保存が正常動作
+- ✅ 新規キャラクター登録時の不要な警告が非表示
+
+---
+
+## 2025-10-02 (修正28): SheetsManagerのバグ修正とCharacterモデル互換性改善
+
+### 変更内容
+Google Sheets使用時のキャラクター登録エラーを修正し、CharacterモデルとSheetsManagerの互換性を改善しました。
+
+**変更ファイル:**
+- `src/services/sheets_manager.py` - 欠落メソッドの追加とデータ変換の修正
+- `src/ui/main_menu.py` - エラーハンドリングのスコープ問題修正
+
+### 問題の原因
+1. **メソッド欠落**: `SheetsManager`に`get_character_by_name()`と`save_character()`メソッドが実装されていない
+2. **データモデル不一致**: Characterモデルは`battle_count`/`win_count`を使用するが、SheetsManagerは`wins`/`losses`/`draws`を期待していた
+3. **ID型の不一致**: CharacterモデルはUUID文字列を使用するが、SheetsManagerは整数IDを使用
+4. **スコープエラー**: 例外変数`e`がlambda関数内で参照できない
+
+### 解決策
+
+#### 1. 欠落メソッドの追加
+```python
+def get_character_by_name(self, name: str) -> Optional[Character]:
+    """Get a character by name"""
+    all_records = self.worksheet.get_all_records()
+    for record in all_records:
+        if record.get('Name') == name:
+            return self._record_to_character(record)
+    return None
+
+def save_character(self, character: Character) -> bool:
+    """Save character (create or update)"""
+    existing = self.get_character_by_name(character.name)
+    if existing:
+        character.id = existing.id
+        return self.update_character(character)
+    return self.create_character(character)
+```
+
+#### 2. データ変換の修正
+```python
+# Characterモデル → スプレッドシート
+losses = character.battle_count - character.win_count
+row = [..., character.win_count, losses, 0]  # draws not tracked
+
+# スプレッドシート → Characterモデル
+wins = int(record.get('Wins', 0))
+losses = int(record.get('Losses', 0))
+draws = int(record.get('Draws', 0))
+battle_count = wins + losses + draws
+win_count = wins
+```
+
+#### 3. ID型変換の実装
+```python
+# update_character()でID変換
+char_id = int(character.id) if isinstance(character.id, str) else character.id
+
+# create_character()で文字列として保存
+character.id = str(next_id)
+```
+
+#### 4. エラーハンドリング修正
+```python
+# Before (NameError発生)
+except Exception as e:
+    self.dialog.after(0, lambda: messagebox.showerror("Error", f"Registration failed: {e}"))
+
+# After (正常動作)
+except Exception as e:
+    error_msg = f"Registration failed: {e}"
+    self.dialog.after(0, lambda msg=error_msg: messagebox.showerror("Error", msg))
+```
+
+### テスト結果
+- ✅ キャラクター登録がGoogle Sheetsモードで正常動作
+- ✅ 既存キャラクターの重複チェックが機能
+- ✅ バトル統計の更新が正常に動作
+- ✅ Google Drive容量エラー時もローカルパスで保存継続
+
+### 既知の制限
+- **Google Drive容量制限**: サービスアカウントが作成するファイルには独自のストレージ容量が必要ですが、サービスアカウントには容量が割り当てられていません
+  - **原因**: 通常のGoogle Driveフォルダにサービスアカウントが直接ファイルを作成すると、サービスアカウントが所有者になるため容量エラーが発生
+  - **解決策**: Google Workspace共有ドライブ（Shared Drive）の使用を推奨。共有ドライブは組織全体のストレージを使用します
+  - **回避策**: 現在は画像アップロード失敗時、ローカルパスでスプレッドシートに保存され、機能は継続します
+
+---
+
 ## 2025-10-01 (修正27): macOS 15+ クラッシュ対策
 
 ### 変更内容
