@@ -130,11 +130,11 @@ async function handleEvent(event) {
       await replyMessage(event.replyToken, [
         {
           type: 'text',
-          text: '画像を受け取りました！\nキャラクターのステータスを手動で入力しますか？',
+          text: '画像を受け取りました！\nステータス入力方法の選択に移ります。',
         },
         {
           type: 'template',
-          altText: 'ステータス入力方法を選択してください',
+          altText: 'キャラクターのステータスを手動で入力しますか？',
           template: {
             type: 'buttons',
             text: '入力方法を選択してください',
