@@ -1,5 +1,121 @@
 # 変更履歴 (CHANGES.md)
 
+## 2025-10-03 (修正54): ストーリーモードの追加
+
+### 変更内容
+Lv1~Lv5のボスキャラクターと順番に戦うストーリーモードを追加しました。各キャラクターごとに進行状況が保存され、最後のボスを倒すとクリアとなります。
+
+**新規ファイル:**
+- `src/models/story_boss.py` - ストーリーボスとプレイヤー進行状況のモデル
+- `src/services/story_mode_engine.py` - ストーリーモードバトルエンジン
+- `src/ui/story_boss_manager.py` - ストーリーボス管理UI
+
+**変更ファイル:**
+- `src/services/sheets_manager.py` - ストーリーボス・進行状況管理メソッド追加
+- `src/ui/main_menu.py` - ストーリーモードUI統合
+
+### 主な機能
+
+#### 1. ストーリーボスシステム
+**StoryBoss モデル (`src/models/story_boss.py`):**
+```python
+class StoryBoss(BaseModel):
+    level: int = Field(ge=1, le=5)  # Lv1~Lv5
+    name: str
+    hp: int = Field(ge=50, le=300)
+    attack: int = Field(ge=30, le=200)
+    defense: int = Field(ge=20, le=150)
+    speed: int = Field(ge=40, le=180)
+    magic: int = Field(ge=10, le=150)
+    description: str
+    image_path: Optional[str]
+    sprite_path: Optional[str]
+```
+
+#### 2. プレイヤー進行状況管理
+**StoryProgress モデル:**
+```python
+class StoryProgress(BaseModel):
+    character_id: str
+    current_level: int = Field(default=1, ge=1, le=5)
+    completed: bool = False
+    victories: list[int] = []  # 撃破したボスレベル
+    attempts: int = 0  # 挑戦回数
+    last_played: datetime
+```
+
+#### 3. Google Sheetsワークシート
+**StoryBosses シート (10列):**
+- Level, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic, Description
+
+**StoryProgress シート (6列):**
+- Character ID, Current Level, Completed, Victories, Attempts, Last Played
+
+#### 4. ストーリーボス管理UI
+**機能:**
+- Lv1~Lv5のボス編集
+- 画像アップロード（オリジナル・スプライト）
+- ステータス設定（各項目に応じた範囲）
+- スプライト自動生成（背景透過処理）
+- Google Driveへの自動アップロード
+
+#### 5. ストーリーモードUI
+**フロー:**
+1. プレイヤーキャラクター選択
+2. 現在の進行状況表示（Lv, 撃破ボス, 挑戦回数）
+3. 次のボス情報表示
+4. バトル実行（ビジュアルモード対応）
+5. 勝利時: 次のレベルへ進行 or クリア
+6. 敗北時: 再挑戦可能
+7. 進行状況リセット機能
+
+#### 6. メインメニュー統合
+**追加メニュー (Game メニュー):**
+- `Story Mode` - ストーリーモード開始
+- `Story Boss Manager` - ストーリーボス管理画面
+
+**注意:** ボタンとして追加するとSegmentation faultが発生するため、メニューバーからのアクセス方式を採用
+
+### 使い方
+
+#### ボス設定
+1. メインメニューから「Game」→「Story Boss Manager」を選択
+2. Lv1~Lv5のいずれかを選択
+3. ボス名・ステータス・説明を入力
+4. 画像を選択し、スプライトを生成
+5. 「保存」でGoogle Sheetsに保存
+
+#### ストーリーモードプレイ
+1. メインメニューから「Game」→「Story Mode」を選択
+2. 使用するキャラクターを選択
+3. 現在のレベルのボスとバトル
+4. 勝利すると次のレベルへ進行
+5. Lv5のボスを倒すとクリア
+
+### 技術仕様
+
+**データベース構造 (Google Sheets):**
+- `StoryBosses` ワークシート: ボスデータ保存
+- `StoryProgress` ワークシート: キャラクターごとの進行状況
+
+**バトルシステム:**
+- `StoryModeEngine`: ボス管理・進行状況管理
+- `BattleEngine`: 既存のバトルエンジンを再利用
+- ビジュアルモード対応（Pygame全画面表示）
+
+**画像管理:**
+- ボス画像もGoogle Driveに保存
+- スプライトは透過PNG形式
+- 画像プロセッサーで背景除去
+
+### 今後の拡張予定
+- ボスの難易度調整機能
+- ストーリーテキスト表示
+- クリア報酬システム
+- リーダーボード（クリア時間ランキング）
+
+---
+
 ## 2025-10-03 (修正53): オリジナル画像の不要なダウンロード・保存を削除
 
 ### 変更内容

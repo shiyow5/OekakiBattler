@@ -1630,3 +1630,236 @@ class SheetsManager:
                 'average_stats': {'hp': 0, 'attack': 0, 'defense': 0, 'speed': 0, 'magic': 0},
                 'top_characters': []
             }
+
+    # ========== Story Mode Methods ==========
+
+    def get_story_boss(self, level: int):
+        """Get story boss by level"""
+        try:
+            from src.models.story_boss import StoryBoss
+
+            if not hasattr(self, 'story_sheet') or self.story_sheet is None:
+                self._init_story_sheet()
+
+            if not self.story_sheet:
+                logger.warning("Story sheet is not available (offline mode or initialization failed)")
+                return None
+
+            records = self.story_sheet.get_all_records()
+            for record in records:
+                if record.get('Level') == level:
+                    image_url = str(record.get('Image URL', '')) if record.get('Image URL') else ''
+                    sprite_url = str(record.get('Sprite URL', '')) if record.get('Sprite URL') else ''
+
+                    # Download sprite if it's a URL
+                    sprite_path = sprite_url
+                    if sprite_url and sprite_url.startswith('http'):
+                        local_sprite = Settings.SPRITES_DIR / f"boss_lv{level}_sprite.png"
+                        if not local_sprite.exists():
+                            self.download_from_url(sprite_url, str(local_sprite))
+                        if local_sprite.exists():
+                            sprite_path = str(local_sprite)
+
+                    return StoryBoss(
+                        level=level,
+                        name=record.get('Name', f'Boss Lv{level}'),
+                        hp=int(record.get('HP', 100)),
+                        attack=int(record.get('Attack', 50)),
+                        defense=int(record.get('Defense', 50)),
+                        speed=int(record.get('Speed', 50)),
+                        magic=int(record.get('Magic', 50)),
+                        description=record.get('Description', ''),
+                        image_path=image_url,
+                        sprite_path=sprite_path
+                    )
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting story boss: {e}")
+            return None
+
+    def save_story_boss(self, boss) -> bool:
+        """Save or update story boss"""
+        try:
+            from src.models.story_boss import StoryBoss
+
+            if not hasattr(self, 'story_sheet') or self.story_sheet is None:
+                self._init_story_sheet()
+
+            if not self.story_sheet:
+                logger.error("Story sheet is not available (offline mode or initialization failed)")
+                return False
+
+            records = self.story_sheet.get_all_records()
+
+            # Check if boss already exists
+            for idx, record in enumerate(records):
+                if record.get('Level') == boss.level:
+                    # Update existing boss
+                    row_num = idx + 2
+                    values = [[
+                        boss.level,
+                        boss.name,
+                        boss.image_path or '',
+                        boss.sprite_path or '',
+                        boss.hp,
+                        boss.attack,
+                        boss.defense,
+                        boss.speed,
+                        boss.magic,
+                        boss.description
+                    ]]
+                    self.story_sheet.update(f'A{row_num}:J{row_num}', values)
+                    logger.info(f"Updated story boss Lv{boss.level}")
+                    return True
+
+            # Add new boss
+            values = [[
+                boss.level,
+                boss.name,
+                boss.image_path or '',
+                boss.sprite_path or '',
+                boss.hp,
+                boss.attack,
+                boss.defense,
+                boss.speed,
+                boss.magic,
+                boss.description
+            ]]
+            self.story_sheet.append_row(values[0])
+            logger.info(f"Added new story boss Lv{boss.level}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error saving story boss: {e}")
+            return False
+
+    def get_story_progress(self, character_id: str):
+        """Get story mode progress for a character"""
+        try:
+            from src.models.story_boss import StoryProgress
+            from datetime import datetime
+
+            if not hasattr(self, 'story_progress_sheet') or self.story_progress_sheet is None:
+                self._init_story_progress_sheet()
+
+            if not self.story_progress_sheet:
+                logger.warning("Story progress sheet is not available (offline mode or initialization failed)")
+                return None
+
+            records = self.story_progress_sheet.get_all_records()
+            for record in records:
+                if str(record.get('Character ID')) == str(character_id):
+                    victories = []
+                    victories_str = record.get('Victories', '')
+                    if victories_str:
+                        # Handle both string and integer values
+                        if isinstance(victories_str, str):
+                            victories = [int(x.strip()) for x in victories_str.split(',') if x.strip()]
+                        elif isinstance(victories_str, int):
+                            victories = [victories_str] if victories_str > 0 else []
+
+                    return StoryProgress(
+                        character_id=str(character_id),
+                        current_level=int(record.get('Current Level', 1)),
+                        completed=record.get('Completed', 'FALSE') == 'TRUE',
+                        victories=victories,
+                        attempts=int(record.get('Attempts', 0)),
+                        last_played=datetime.fromisoformat(record.get('Last Played', datetime.now().isoformat()))
+                    )
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting story progress: {e}")
+            return None
+
+    def save_story_progress(self, progress) -> bool:
+        """Save story mode progress"""
+        try:
+            from datetime import datetime
+
+            if not hasattr(self, 'story_progress_sheet') or self.story_progress_sheet is None:
+                self._init_story_progress_sheet()
+
+            if not self.story_progress_sheet:
+                logger.error("Story progress sheet is not available (offline mode or initialization failed)")
+                return False
+
+            records = self.story_progress_sheet.get_all_records()
+            victories_str = ','.join([str(v) for v in progress.victories])
+
+            # Check if progress already exists
+            for idx, record in enumerate(records):
+                if str(record.get('Character ID')) == str(progress.character_id):
+                    # Update existing progress
+                    row_num = idx + 2
+                    values = [[
+                        progress.character_id,
+                        progress.current_level,
+                        'TRUE' if progress.completed else 'FALSE',
+                        victories_str,
+                        progress.attempts,
+                        datetime.now().isoformat()
+                    ]]
+                    self.story_progress_sheet.update(f'A{row_num}:F{row_num}', values)
+                    logger.info(f"Updated story progress for character {progress.character_id}")
+                    return True
+
+            # Add new progress
+            values = [[
+                progress.character_id,
+                progress.current_level,
+                'TRUE' if progress.completed else 'FALSE',
+                victories_str,
+                progress.attempts,
+                datetime.now().isoformat()
+            ]]
+            self.story_progress_sheet.append_row(values[0])
+            logger.info(f"Added new story progress for character {progress.character_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error saving story progress: {e}")
+            return False
+
+    def _init_story_sheet(self):
+        """Initialize story bosses worksheet"""
+        try:
+            if not self.online_mode or not hasattr(self, 'sheet') or self.sheet is None:
+                self.story_sheet = None
+                return
+
+            try:
+                self.story_sheet = self.sheet.worksheet("StoryBosses")
+                logger.info("StoryBosses sheet found")
+            except:
+                # Create the sheet if it doesn't exist
+                self.story_sheet = self.sheet.add_worksheet(title="StoryBosses", rows=100, cols=10)
+                headers = ['Level', 'Name', 'Image URL', 'Sprite URL', 'HP', 'Attack', 'Defense', 'Speed', 'Magic', 'Description']
+                self.story_sheet.update('A1:J1', [headers])
+                logger.info("Created StoryBosses sheet")
+
+        except Exception as e:
+            logger.error(f"Error initializing story sheet: {e}")
+            self.story_sheet = None
+
+    def _init_story_progress_sheet(self):
+        """Initialize story progress worksheet"""
+        try:
+            if not self.online_mode or not hasattr(self, 'sheet') or self.sheet is None:
+                self.story_progress_sheet = None
+                return
+
+            try:
+                self.story_progress_sheet = self.sheet.worksheet("StoryProgress")
+                logger.info("StoryProgress sheet found")
+            except:
+                # Create the sheet if it doesn't exist
+                self.story_progress_sheet = self.sheet.add_worksheet(title="StoryProgress", rows=1000, cols=6)
+                headers = ['Character ID', 'Current Level', 'Completed', 'Victories', 'Attempts', 'Last Played']
+                self.story_progress_sheet.update('A1:F1', [headers])
+                logger.info("Created StoryProgress sheet")
+
+        except Exception as e:
+            logger.error(f"Error initializing story progress sheet: {e}")
+            self.story_progress_sheet = None

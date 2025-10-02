@@ -113,17 +113,21 @@ OekakiBattler/
 ├── src/
 │   ├── models/
 │   │   ├── character.py      # Character data model (Pydantic)
-│   │   └── battle.py         # Battle data model with statistics
+│   │   ├── battle.py         # Battle data model with statistics
+│   │   └── story_boss.py     # Story mode boss and progress models
 │   ├── services/
 │   │   ├── ai_analyzer.py    # Google Gemini AI analysis
 │   │   ├── image_processor.py # Image extraction & sprite processing
 │   │   ├── battle_engine.py  # Battle simulation engine
+│   │   ├── story_mode_engine.py # Story mode battle engine
+│   │   ├── endless_battle_engine.py # Endless battle tournament engine
 │   │   ├── sheets_manager.py # Google Sheets/Drive manager (online mode)
 │   │   ├── database_manager.py # SQLite manager (offline mode)
 │   │   ├── audio_manager.py  # Sound effects manager
 │   │   └── settings_manager.py # User settings persistence
 │   ├── ui/
-│   │   └── main_menu.py      # Tkinter/Pygame GUI
+│   │   ├── main_menu.py      # Tkinter/Pygame GUI
+│   │   └── story_boss_manager.py # Story mode boss management UI
 │   └── utils/
 │       ├── image_utils.py    # Image utility functions
 │       └── file_utils.py     # File I/O utilities
@@ -181,6 +185,29 @@ class Battle(BaseModel):
     result_type: str          # "KO", "Time Limit", "Draw"
 ```
 
+#### Story Boss Model (`src/models/story_boss.py`)
+```python
+class StoryBoss(BaseModel):
+    level: int = Field(ge=1, le=5)  # Boss level (1-5)
+    name: str
+    hp: int = Field(ge=50, le=300)
+    attack: int = Field(ge=30, le=200)
+    defense: int = Field(ge=20, le=150)
+    speed: int = Field(ge=40, le=180)
+    magic: int = Field(ge=10, le=150)
+    description: str
+    image_path: Optional[str]
+    sprite_path: Optional[str]
+
+class StoryProgress(BaseModel):
+    character_id: str
+    current_level: int = Field(default=1, ge=1, le=5)
+    completed: bool = False
+    victories: list[int] = []  # List of defeated boss levels
+    attempts: int = 0
+    last_played: datetime
+```
+
 ### Core System Components
 
 #### 1. Image Processing Pipeline (`image_processor.py`)
@@ -195,21 +222,37 @@ class Battle(BaseModel):
 - **Character Profiling**: Generates Japanese descriptions
 - **Structured Output**: Uses Pydantic models for validation
 
-#### 3. Automated Battle System (`battle_engine.py`)
+#### 3. Battle Systems
+
+**Standard Battle (`battle_engine.py`)**
 - **Turn-Based Combat**: Speed determines action order
 - **Damage Calculation**: `damage = attack - defense + random_factor`
 - **Special Mechanics**: Critical hits (5%), magic attacks, evasion
 - **Battle Statistics**: Tracks damage dealt, final HP, result type
 - **Visual Display**: Real-time Pygame rendering with HP bars and animations
 
+**Story Mode (`story_mode_engine.py`)**
+- **Progressive Boss Battles**: Fight bosses Lv1-5 in sequence
+- **Non-Stop Execution**: Continuous battles until completion or defeat
+- **Challenge Display**: Shows boss level and name before each battle (2 sec)
+- **Progress Tracking**: Saves victories, current level, and completion status
+- **Boss Management**: Create and edit bosses via Story Boss Manager UI
+
+**Endless Battle (`endless_battle_engine.py`)**
+- **Tournament Style**: All characters battle in elimination format
+- **Champion System**: Winner becomes champion, faces next challenger
+- **Auto-Progression**: Battles continue until one character remains
+- **Battle History**: Records all battles to Google Sheets (online mode)
+
 #### 4. Data Persistence Layer
 
 **Online Mode (`sheets_manager.py`):**
-- **Google Sheets Integration**: 3 worksheets (Characters, BattleHistory, Rankings)
+- **Google Sheets Integration**: 5 worksheets (Characters, BattleHistory, Rankings, StoryBosses, StoryProgress)
 - **Google Drive Upload**: Automatic image upload with public URLs
 - **Battle History Recording**: Detailed 15-column battle logs
 - **Auto-Ranking Updates**: Rating = (Wins × 3) + Draws
-- **Image Caching**: Downloads and caches images from Drive URLs
+- **Story Mode Support**: Boss data and player progress persistence
+- **Image Caching**: Downloads and caches sprites from Drive URLs (originals not cached)
 
 **Offline Mode (`database_manager.py`):**
 - **SQLite Database**: Local data persistence
@@ -236,17 +279,27 @@ else:
 - **Spreadsheet Logging**: Records uploaded images in spreadsheet
 - **ngrok Tunneling**: HTTPS endpoint for local development
 
-#### 6. User Interface (`main_menu.py`)
+#### 6. User Interface
+
+**Main Menu (`main_menu.py`)**
 - **Tkinter GUI**: Main application window with character management
-- **Pygame Battle Display**: Real-time battle visualization
+- **Pygame Battle Display**: Real-time battle visualization (fullscreen)
 - **Character Registration**: Image upload, AI analysis, data entry
-- **Battle Management**: Fighter selection, visual mode toggle
+- **Battle Modes**: Standard 1v1, Random, Endless, Story Mode
 - **Statistics Viewer**: Win rates, rankings, battle history
 - **Settings Manager**: User preferences, battle speed, sound options
+- **Menu Bar**: Access to Story Mode and Story Boss Manager
+
+**Story Boss Manager (`story_boss_manager.py`)**
+- **Boss Editor**: Create/edit Lv1-5 bosses
+- **Image Upload**: Original image and sprite with transparency
+- **Stat Configuration**: HP (50-300), Attack (30-200), Defense (20-150), Speed (40-180), Magic (10-150)
+- **Auto Sprite Generation**: Background removal and transparency processing
+- **Google Drive Integration**: Automatic upload of boss images
 
 ### Google Sheets Structure
 
-The application manages 3 worksheets:
+The application manages 5 worksheets:
 
 **1. Characters Sheet (14 columns)**
 - ID, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic
@@ -259,6 +312,12 @@ The application manages 3 worksheets:
 **3. Rankings Sheet (10 columns)**
 - Rank, Character ID/Name, Total Battles, Wins/Losses/Draws
 - Win Rate (%), Avg Damage, Rating
+
+**4. StoryBosses Sheet (10 columns)**
+- Level, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic, Description
+
+**5. StoryProgress Sheet (6 columns)**
+- Character ID, Current Level, Completed, Victories, Attempts, Last Played
 
 All worksheets are automatically created on first run with proper headers.
 
@@ -353,6 +412,33 @@ pytest tests/test_battle_engine.py -v  # Specific test file
 - Google API keys: Rotate regularly, restrict by IP/domain in production
 - LINE Bot secrets: Use webhook verification in production
 - Service account: Limit permissions to only required APIs
+
+### Using Story Mode
+
+**Setting Up Bosses:**
+1. Open Story Boss Manager: Menu Bar → Game → Story Boss Manager
+2. Select boss level (Lv1-Lv5) from the left panel
+3. Enter boss name, stats, and description
+4. Upload original image and generate sprite (with transparency)
+5. Click "保存" to save to Google Sheets
+
+**Playing Story Mode:**
+1. Start Story Mode: Menu Bar → Game → Story Mode
+2. Select your character from the list
+3. Click "バトル開始" to begin
+4. Battles run continuously (Lv1→Lv5) until:
+   - You defeat Lv5 boss (Clear!)
+   - You lose to any boss (Game Over)
+5. Before each battle, a challenge window displays for 2 seconds:
+   - Boss level
+   - Boss name
+   - "挑戦します！" message
+
+**Progress Management:**
+- Progress is saved per character in Google Sheets
+- Current level, victories, and attempts are tracked
+- Use "進行状況リセット" to restart from Lv1
+- Completed status persists until reset
 
 ### Common Development Tasks
 
