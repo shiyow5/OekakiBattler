@@ -6,8 +6,9 @@
 3. [バトルフロー](#バトルフロー)
 4. [ダメージ計算](#ダメージ計算)
 5. [特殊システム](#特殊システム)
-6. [バランス調整](#バランス調整)
-7. [実装詳細](#実装詳細)
+6. [ストーリーモード](#ストーリーモード)
+7. [バランス調整](#バランス調整)
+8. [実装詳細](#実装詳細)
 
 ---
 
@@ -206,6 +207,144 @@ final_hit_rate = clamp(base_hit_rate + speed_bonus, 80%, 95%)
 
 ---
 
+## ストーリーモード
+
+### 📖 概要
+
+ストーリーモードは、Lv1～Lv5の固定ボスに順番に挑戦するモードです。通常のバトルシステムをベースに、以下の特徴があります。
+
+### 🎯 ストーリーモード仕様
+
+#### ボスキャラクターステータス範囲
+
+| ステータス | 範囲 | 通常キャラとの差異 |
+|---|---|---|
+| **HP（体力）** | 50-300 | 最大値が2倍（通常:150） |
+| **Attack（攻撃力）** | 30-200 | 最大値が1.67倍（通常:120） |
+| **Defense（防御力）** | 20-150 | 最大値が1.5倍（通常:100） |
+| **Speed（素早さ）** | 40-180 | 最大値が1.38倍（通常:130） |
+| **Magic（魔力）** | 10-150 | 最大値が1.5倍（通常:100） |
+
+#### 進行システム
+
+```python
+class StoryProgress:
+    character_id: str          # プレイヤーキャラクターID
+    current_level: int         # 現在のレベル（1-5）
+    completed: bool            # クリア済みフラグ
+    victories: list[int]       # 撃破済みボスリスト
+    attempts: int              # 総挑戦回数
+    last_played: datetime      # 最終プレイ日時
+```
+
+#### バトルフロー
+
+```python
+def run_story_battles(player: Character, story_engine: StoryModeEngine):
+    """ストーリーモードバトル実行（ノンストップ）"""
+    progress = story_engine.get_player_progress(player.id)
+
+    while not progress.completed:
+        next_level = progress.current_level
+        boss = story_engine.get_boss(next_level)
+
+        # 挑戦確認ウィンドウ表示（2秒間）
+        show_challenge_window(next_level, boss.name)
+
+        # バトル実行
+        story_engine.start_battle(player, next_level)
+        result = story_engine.execute_battle(visual_mode=True)
+
+        # 結果判定
+        victory = (result['winner'].id == player.id)
+        story_engine.update_progress(player.id, next_level, victory)
+
+        if not victory:
+            # 敗北時は終了
+            break
+
+        if next_level == 5 and victory:
+            # Lv5撃破でクリア
+            progress.completed = True
+            break
+
+        # 次のレベルへ自動進行
+        progress = story_engine.get_player_progress(player.id)
+```
+
+### 🏆 進行状況管理
+
+#### 進行状況の保存条件
+
+1. **バトル開始時**: 挑戦回数をインクリメント
+2. **バトル勝利時**:
+   - 勝利ボスレベルを記録
+   - `current_level`を次のレベルに更新
+   - Lv5撃破時に`completed = True`
+3. **バトル敗北時**: 進捗は維持（再挑戦可能）
+
+#### 進行状況のリセット
+
+```python
+def reset_progress(character_id: str):
+    """進行状況をリセット"""
+    progress = StoryProgress(
+        character_id=character_id,
+        current_level=1,
+        completed=False,
+        victories=[],
+        attempts=0,
+        last_played=datetime.now()
+    )
+    db_manager.save_story_progress(progress)
+```
+
+### 🎮 ボス管理
+
+#### ボス作成・編集UI
+
+- **ストーリーボスマネージャー**: 専用UIからボス作成・編集
+- **ステータス設定**: スライダーで各ステータスを調整
+- **画像管理**: オリジナル画像アップロード、スプライト自動生成
+- **Google Drive連携**: 画像を自動的にGoogle Driveに保存
+
+#### データ保存
+
+```python
+# StoryBosses worksheet構造
+Level | Name | HP | Attack | Defense | Speed | Magic | Description | Image URL | Sprite URL
+  1   | Boss1| 100| 50     | 50      | 50    | 50    | 説明        | URL       | URL
+  2   | Boss2| 140| 80     | 70      | 70    | 70    | 説明        | URL       | URL
+  ...
+```
+
+### ⚡ 特殊処理
+
+#### スプライトキャッシング
+
+```python
+def get_story_boss(level: int) -> Optional[StoryBoss]:
+    """ボス取得（スプライト自動ダウンロード）"""
+    boss = load_from_database(level)
+
+    if boss.sprite_path and boss.sprite_path.startswith('http'):
+        # Google DriveからURLをダウンロード
+        local_path = f"data/sprites/boss_lv{level}_sprite.png"
+        if not os.path.exists(local_path):
+            download_from_url(boss.sprite_path, local_path)
+        boss.sprite_path = local_path
+
+    return boss
+```
+
+#### ノンストップ実行
+
+- 一度開始すると敗北またはクリアまで自動進行
+- 各バトル前に2秒間の挑戦確認ウィンドウ
+- ビジュアルモード強制有効（バトル表示必須）
+
+---
+
 ## バランス調整
 
 ### 💪 ステータス影響度
@@ -301,12 +440,16 @@ battle_speed = 0.5  # ターン間の待機時間
 | ファイル | 役割 |
 |---|---|
 | `src/services/battle_engine.py` | メインバトルロジック |
+| `src/services/story_mode_engine.py` | ストーリーモードロジック |
 | `src/models/character.py` | キャラクターモデル |
 | `src/models/battle.py` | バトル・ターンモデル |
+| `src/models/story_boss.py` | ストーリーボス・進捗モデル |
+| `src/ui/story_boss_manager.py` | ボス管理UI |
 | `config/settings.py` | バトル設定値 |
 | `src/services/database_manager.py` | バトル結果保存 |
+| `src/services/sheets_manager.py` | ストーリーデータ保存（Google Sheets） |
 
 ---
 
 *このドキュメントは お絵描きバトラー v1.0 の仕様に基づいています。*
-*最終更新: 2025年1月*
+*最終更新: 2025年10月（ストーリーモード追加）*
