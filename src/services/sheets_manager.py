@@ -477,10 +477,10 @@ class SheetsManager:
                     logger.warning(f"⚠ Failed to upload original image to Drive, using local path: {character.image_path}")
 
             if character.sprite_path and Path(character.sprite_path).exists():
-                # Upload sprite image
+                # Upload sprite image (always PNG for transparency)
                 uploaded_url = self.upload_to_drive(
                     character.sprite_path,
-                    f"char_{next_id}_sprite{Path(character.sprite_path).suffix}"
+                    f"char_{next_id}_sprite.png"
                 )
                 if uploaded_url:
                     sprite_url = uploaded_url
@@ -945,6 +945,43 @@ class SheetsManager:
                 logger.error(f"Failed to download image for character {char_id}")
                 return None
 
+            # Process image to create sprite with transparency
+            logger.info(f"Processing image to create sprite for character {char_id}...")
+            if progress_callback:
+                progress_callback(current, total, None, "スプライトを作成中...")
+
+            from src.services.image_processor import ImageProcessor
+            image_processor = ImageProcessor()
+
+            # Create sprite with transparency
+            sprite_path = None
+            sprite_url = None
+            success, message, sprite_output = image_processor.process_character_image(
+                str(local_path),
+                str(Settings.SPRITES_DIR),
+                f"char_{char_id}"
+            )
+
+            if success and sprite_output:
+                sprite_path = sprite_output
+                logger.info(f"✓ Created sprite with transparency: {sprite_path}")
+
+                # Upload sprite to Google Drive
+                logger.info(f"Uploading sprite to Google Drive for character {char_id}...")
+                if progress_callback:
+                    progress_callback(current, total, None, "スプライトをアップロード中...")
+
+                sprite_url = self.upload_to_drive(sprite_path, f"char_{char_id}_sprite.png")
+                if sprite_url:
+                    logger.info(f"✓ Uploaded sprite to Drive: {sprite_url}")
+                else:
+                    logger.warning(f"Failed to upload sprite to Drive, using local path")
+                    sprite_url = sprite_path
+            else:
+                logger.warning(f"Failed to create sprite: {message}, using original image")
+                sprite_path = str(local_path)
+                sprite_url = image_url  # Use existing image URL
+
             # Use AI analyzer to generate stats
             logger.info(f"Generating stats using AI for character {char_id}...")
             if progress_callback:
@@ -970,15 +1007,15 @@ class SheetsManager:
                 magic=char_stats.magic,
                 description=char_stats.description,
                 image_path=str(local_path),
-                sprite_path=str(local_path)
+                sprite_path=sprite_path if sprite_path else str(local_path)
             )
 
-            # Update the spreadsheet with generated stats
+            # Update the spreadsheet with generated stats and sprite URL
             logger.info(f"Updating spreadsheet with generated stats for character {char_id}")
             if progress_callback:
                 progress_callback(current, total, analyzed_char.name, "スプレッドシートを更新中...")
 
-            self._update_character_stats_in_sheet(char_id, analyzed_char)
+            self._update_character_stats_in_sheet(char_id, analyzed_char, sprite_url)
 
             logger.info(f"✓ Successfully generated stats for character '{analyzed_char.name}' (ID: {char_id})")
             if progress_callback:
@@ -990,8 +1027,14 @@ class SheetsManager:
             logger.error(f"Error generating stats for character: {e}")
             return None
 
-    def _update_character_stats_in_sheet(self, char_id: int, character: Character) -> bool:
-        """Update character stats in spreadsheet using batch update for efficiency"""
+    def _update_character_stats_in_sheet(self, char_id: int, character: Character, sprite_url: str = None) -> bool:
+        """Update character stats in spreadsheet using batch update for efficiency
+
+        Args:
+            char_id: Character ID
+            character: Character object with stats
+            sprite_url: Optional sprite URL to update (if None, preserve existing)
+        """
         try:
             all_records = self.worksheet.get_all_records()
 
@@ -999,9 +1042,12 @@ class SheetsManager:
                 if record.get('ID') == char_id:
                     row_num = idx + 2  # +2 because of header row and 0-indexing
 
-                    # Get existing Image URL and Sprite URL (don't overwrite them)
+                    # Get existing Image URL and Sprite URL (don't overwrite them unless specified)
                     existing_image_url = record.get('Image URL', '')
                     existing_sprite_url = record.get('Sprite URL', '')
+
+                    # Use provided sprite_url if available, otherwise preserve existing
+                    final_sprite_url = sprite_url if sprite_url else existing_sprite_url
 
                     # Use update() with range to update multiple cells at once
                     # Columns: B=Name, C=Image URL, D=Sprite URL, E=HP, F=Attack, G=Defense, H=Speed, I=Magic, J=Description
@@ -1009,7 +1055,7 @@ class SheetsManager:
                     values = [[
                         character.name,           # B: Name
                         existing_image_url,       # C: Image URL (preserve existing)
-                        existing_sprite_url,      # D: Sprite URL (preserve existing)
+                        final_sprite_url,         # D: Sprite URL (use new if provided, otherwise preserve)
                         character.hp,             # E: HP
                         character.attack,         # F: Attack
                         character.defense,        # G: Defense
@@ -1022,6 +1068,8 @@ class SheetsManager:
                     self.worksheet.update(cell_range, values, value_input_option='USER_ENTERED')
 
                     logger.info(f"✓ Updated stats in spreadsheet for character {char_id} (Name: {character.name})")
+                    if sprite_url:
+                        logger.info(f"✓ Updated sprite URL: {sprite_url}")
                     return True
 
             logger.warning(f"Character not found in spreadsheet: ID {char_id}")

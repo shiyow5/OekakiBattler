@@ -884,17 +884,17 @@ class CharacterRegistrationDialog:
         self.parent = parent
         self.main_window = main_window
         self.character = None
-        
+
         # Create dialog
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Character Registration")
         self.dialog.geometry("600x500")
         self.dialog.transient(parent)
         self.dialog.grab_set()
-        
+
         # Center dialog
         self.dialog.geometry("+%d+%d" % (parent.winfo_rootx() + 100, parent.winfo_rooty() + 50))
-        
+
         self._create_widgets()
     
     def _create_widgets(self):
@@ -1117,11 +1117,11 @@ class CharacterRegistrationDialog:
                         str(Settings.SPRITES_DIR),
                         name
                     )
-                    
+
                     if not success:
                         self.dialog.after(0, lambda: messagebox.showerror("Error", f"Image processing failed: {message}"))
                         return
-                    
+
                     # Create character
                     character = Character(
                         name=name,
@@ -1173,11 +1173,11 @@ class StatsWindow:
         self.window.title("📊 統計情報")
         self.window.geometry("500x600")
         self.window.resizable(False, False)
-        
+
         # Center the window
         self.window.transient(parent)
         self.window.grab_set()
-        
+
         self._create_widgets()
     
     def _create_widgets(self):
@@ -2106,14 +2106,14 @@ class SettingsWindow:
         self.window.title("⚙️ 設定")
         self.window.geometry("500x600")
         self.window.resizable(False, False)
-        
+
         # Center the window
         self.window.transient(parent)
         self.window.grab_set()
-        
+
         # Settings variables
         self.settings = self._load_settings()
-        
+
         self._create_widgets()
     
     def _load_settings(self):
@@ -2490,8 +2490,40 @@ class EndlessBattleWindow:
                 self._update_battle_complete(result)
 
                 # Save battle to database
-                if self.db_manager.save_battle(result['battle']):
-                    logger.info(f"Endless battle saved: {result['battle'].id}")
+                battle = result['battle']
+                if self.db_manager.save_battle(battle):
+                    logger.info(f"Endless battle saved: {battle.id}")
+
+                # Record battle history to Google Sheets (online mode only)
+                if isinstance(self.db_manager, SheetsManager) and self.db_manager.online_mode:
+                    battle_data = {
+                        'battle_id': battle.id,
+                        'fighter1_id': battle.character1_id,
+                        'fighter2_id': battle.character2_id,
+                        'fighter1_name': result.get('fighter1_name', ''),
+                        'fighter2_name': result.get('fighter2_name', ''),
+                        'winner_id': battle.winner_id,
+                        'winner_name': result.get('winner_name', ''),
+                        'total_turns': len(battle.turns),
+                        'duration': battle.duration,
+                        'f1_final_hp': battle.char1_final_hp,
+                        'f2_final_hp': battle.char2_final_hp,
+                        'f1_damage_dealt': battle.char1_damage_dealt,
+                        'f2_damage_dealt': battle.char2_damage_dealt,
+                        'result_type': battle.result_type,
+                        'battle_log': battle.battle_log
+                    }
+
+                    if self.db_manager.record_battle_history(battle_data):
+                        logger.info("Endless battle history recorded to Google Sheets")
+                    else:
+                        logger.warning("Failed to record endless battle history")
+
+                    # Update rankings after battle
+                    if self.db_manager.update_rankings():
+                        logger.info("Rankings updated successfully")
+                    else:
+                        logger.warning("Failed to update rankings")
 
                 # Schedule next battle
                 self.window.after(1000, self._start_battle_loop)

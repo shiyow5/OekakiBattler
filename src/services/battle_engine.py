@@ -64,13 +64,18 @@ class BattleEngine:
             
             # Initialize audio and load default sounds
             audio_manager.create_default_sounds()
-            
-            # Create new display
-            self.screen = pygame.display.set_mode((Settings.SCREEN_WIDTH, Settings.SCREEN_HEIGHT))
-            logger.info("New battle display created")
-            
+
+            # Create new display in fullscreen mode
+            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+
+            # Get actual fullscreen size
+            self.screen_width = self.screen.get_width()
+            self.screen_height = self.screen.get_height()
+
+            logger.info(f"New battle display created in fullscreen mode ({self.screen_width}x{self.screen_height})")
+
             pygame.display.set_caption("お絵描きバトラー - Battle Arena")
-            
+
             # Initialize clock if needed
             if self.clock is None:
                 self.clock = pygame.time.Clock()
@@ -334,23 +339,23 @@ class BattleEngine:
             if action_type == "magic":
                 base_damage = attacker.magic + random.randint(-10, 10)
                 # Magic ignores some defense
-                effective_defense = max(0, defender.defense * 0.5)
+                effective_defense = int(max(0, defender.defense * 0.5))
             else:  # Physical attack
                 base_damage = attacker.attack + random.randint(-15, 15)
                 effective_defense = defender.defense
-            
+
             # Apply defense
-            damage = max(1, base_damage - effective_defense + random.randint(-5, 5))
-            
+            damage = int(max(1, base_damage - effective_defense + random.randint(-5, 5)))
+
             # Check for critical hit
             critical_chance = self.critical_chance
             if action_type == "magic":
                 critical_chance *= 0.7  # Magic has lower critical chance
-            
+
             if random.random() < critical_chance:
                 is_critical = True
                 damage = int(damage * self.critical_multiplier)
-            
+
             return damage, is_critical, is_miss
             
         except Exception as e:
@@ -1343,10 +1348,10 @@ class BattleEngine:
 
             pygame.display.flip()
 
-            # Wait for user input or auto-close after 3 seconds
+            # Wait for user input or auto-close after 5 seconds
             waiting = True
             clock = pygame.time.Clock()
-            auto_close_time = 3.0  # Auto-close after 3 seconds
+            auto_close_time = 5.0  # Auto-close after 5 seconds
             elapsed_time = 0.0
 
             while waiting:

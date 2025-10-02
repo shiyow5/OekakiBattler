@@ -88,37 +88,44 @@ class EndlessBattleEngine:
         challenger = random.choice(self.participants)
         self.participants.remove(challenger)
 
-        logger.info(f"Battle {self.battle_count + 1}: {self.current_champion.name} vs {challenger.name}")
+        # Store battle participants (before champion might change)
+        fighter1 = self.current_champion
+        fighter2 = challenger
+
+        logger.info(f"Battle {self.battle_count + 1}: {fighter1.name} vs {fighter2.name}")
 
         # Execute battle
         battle = self.battle_engine.start_battle(
-            self.current_champion,
-            challenger,
+            fighter1,
+            fighter2,
             visual_mode=visual_mode
         )
 
         self.battle_count += 1
 
         # Determine new champion
-        if battle.winner_id == self.current_champion.id:
+        if battle.winner_id == fighter1.id:
             # Champion wins
             self.champion_wins += 1
             # Add challenger back to pool (optional: could be eliminated)
             # self.participants.append(challenger)
-            winner = self.current_champion
-            loser = challenger
-        elif battle.winner_id == challenger.id:
+            winner = fighter1
+            winner_name = fighter1.name
+            loser = fighter2
+        elif battle.winner_id == fighter2.id:
             # Challenger wins, becomes new champion
             # Old champion goes back to pool (optional: could be eliminated)
             # self.participants.append(self.current_champion)
-            self.current_champion = challenger
+            self.current_champion = fighter2
             self.champion_wins = 1
-            winner = challenger
-            loser = self.current_champion
+            winner = fighter2
+            winner_name = fighter2.name
+            loser = fighter1
         else:
             # Draw - both return to pool
             self.participants.append(challenger)
             winner = None
+            winner_name = "Draw"
             loser = None
 
         return {
@@ -129,7 +136,10 @@ class EndlessBattleEngine:
             'remaining_count': len(self.participants),
             'battle_count': self.battle_count,
             'winner': winner,
-            'loser': loser
+            'loser': loser,
+            'fighter1_name': fighter1.name,
+            'fighter2_name': fighter2.name,
+            'winner_name': winner_name
         }
 
     def _load_characters(self):

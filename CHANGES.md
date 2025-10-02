@@ -1,5 +1,516 @@
 # 変更履歴 (CHANGES.md)
 
+## 2025-10-03 (修正52): LINEボット登録時のスプライト透過処理
+
+### 変更内容
+LINEボットから画像を送信してキャラクター登録する際に、スプライトが透過PNG形式で保存されていなかった問題を修正しました。
+
+**変更ファイル:**
+- `src/services/sheets_manager.py` - AI生成時にスプライト作成・アップロード処理を追加
+
+### 主な修正内容
+
+#### 問題
+LINEボットからの登録では、`image_processor.process_character_image()`を経由しないため、透過処理されたスプライトが作成されていませんでした。
+
+#### 登録フロー比較
+
+**UI登録（正常動作）:**
+1. ユーザーが画像選択
+2. `image_processor.process_character_image()` がスプライト作成（透過あり）
+3. `save_character()` がオリジナルとスプライトをGoogle Driveにアップロード
+4. ✓ スプライトに透過処理あり
+
+**LINEボット登録（修正前）:**
+1. LINE経由で画像送信
+2. server.jsが圧縮してGASにアップロード
+3. GASがGoogle Driveに保存
+4. Pythonアプリが空ステータス検出
+5. `_generate_stats_for_character()` が画像をダウンロードしてAI分析
+6. ✗ スプライト作成・アップロードなし
+
+#### 修正後の実装
+
+**sheets_manager.py `_generate_stats_for_character()`メソッド:**
+```python
+# スプライト作成（透過処理あり）
+from src.services.image_processor import ImageProcessor
+image_processor = ImageProcessor()
+
+sprite_path = None
+sprite_url = None
+success, message, sprite_output = image_processor.process_character_image(
+    str(local_path),
+    str(Settings.SPRITES_DIR),
+    f"char_{char_id}"
+)
+
+if success and sprite_output:
+    sprite_path = sprite_output
+    logger.info(f"✓ Created sprite with transparency: {sprite_path}")
+
+    # Google Driveにスプライトをアップロード
+    sprite_url = self.upload_to_drive(sprite_path, f"char_{char_id}_sprite.png")
+    if sprite_url:
+        logger.info(f"✓ Uploaded sprite to Drive: {sprite_url}")
+
+# スプレッドシートのSprite URLを更新
+self._update_character_stats_in_sheet(char_id, analyzed_char, sprite_url)
+```
+
+**`_update_character_stats_in_sheet()` メソッドの変更:**
+```python
+def _update_character_stats_in_sheet(self, char_id: int, character: Character, sprite_url: str = None) -> bool:
+    # sprite_urlが提供された場合は更新、なければ既存を維持
+    final_sprite_url = sprite_url if sprite_url else existing_sprite_url
+
+    values = [[
+        character.name,
+        existing_image_url,
+        final_sprite_url,  # 新しいスプライトURLを使用
+        # ... その他のステータス
+    ]]
+```
+
+### 動作確認
+- LINEボットから画像を送信
+- AI生成でステータス作成時にスプライトも透過PNG形式で作成
+- Google Driveにアップロード
+- スプレッドシートのSprite URLが更新される
+
+---
+
+## 2025-10-03 (修正50-51取り消し): スプライトのみ透過PNG保存
+
+### 変更内容
+修正50と51を取り消しました。オリジナル画像は元のままで、透過PNG保存が必要なのはスプライトのみです。
+
+**変更ファイル:**
+- `src/services/image_processor.py` - 元の実装に戻す
+- `src/ui/main_menu.py` - 元の実装に戻す
+- `src/services/sheets_manager.py` - スプライトのみPNG固定
+
+### 主な修正内容
+
+#### 修正50-51の問題
+オリジナル画像も透過PNG形式で保存していましたが、これは誤りでした。オリジナル画像は元の形式を保持し、透過が必要なのはバトルで使用するスプライトのみです。
+
+#### 正しい実装
+
+**image_processor.py:**
+```python
+def process_character_image(self, input_path: str, output_dir: str, character_name: str) -> Tuple[bool, str, Optional[str]]:
+    # スプライトのみ透過PNG形式で保存
+    sprite_output_path = Path(output_dir) / f"{character_name}_sprite.png"
+    self.save_sprite(processed, str(sprite_output_path))
+    return True, "Success", str(sprite_output_path)
+```
+
+**main_menu.py:**
+```python
+success, message, sprite_path = self.main_window.image_processor.process_character_image(...)
+character = Character(
+    image_path=image_path,  # オリジナル画像は元の形式のまま
+    sprite_path=sprite_path  # スプライトのみ透過PNG
+)
+```
+
+**sheets_manager.py:**
+```python
+# Upload original image
+uploaded_url = self.upload_to_drive(
+    character.image_path,
+    f"char_{next_id}_original{Path(character.image_path).suffix}"  # 元の拡張子を維持
+)
+
+# Upload sprite image (always PNG for transparency)
+uploaded_url = self.upload_to_drive(
+    character.sprite_path,
+    f"char_{next_id}_sprite.png"  # スプライトはPNG固定
+)
+```
+
+### 期待される効果
+- オリジナル画像は元の形式（JPEG、PNG等）を保持
+- スプライトは透過PNG形式で保存され、バトルで背景透明表示
+- Google Driveに適切な形式でアップロード
+
+---
+
+## 2025-10-03 (修正49): Pygameバトル画面の全画面表示対応
+
+### 変更内容
+修正46と旧修正49を取り消し、Pygameによるバトル画面のみを全画面表示にするように変更しました。Tkinterのウィンドウはそのままにしてあります。
+
+**変更ファイル:**
+- `src/services/battle_engine.py` - Pygameディスプレイの全画面表示設定
+- `src/ui/main_menu.py` - 修正46、旧修正49の取り消し
+
+### 主な修正内容
+
+#### 修正46と旧修正49の取り消し
+- `inherit_fullscreen_state()`関数を削除
+- 全ウィンドウからの全画面表示設定を削除
+- BattleHistoryWindow、EndlessBattleWindowは通常表示に戻す
+
+#### Pygameバトル画面の全画面表示
+
+**変更前:**
+```python
+self.screen = pygame.display.set_mode((Settings.SCREEN_WIDTH, Settings.SCREEN_HEIGHT))
+```
+
+**変更後:**
+```python
+# Create new display in fullscreen mode
+self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+
+# Get actual fullscreen size
+self.screen_width = self.screen.get_width()
+self.screen_height = self.screen.get_height()
+
+logger.info(f"New battle display created in fullscreen mode ({self.screen_width}x{self.screen_height})")
+```
+
+### 期待される効果
+- バトル実行時のPygame画面が全画面表示され、臨場感が向上
+- Tkinterの管理ウィンドウは通常表示で操作しやすい
+- 既存の描画処理は`self.screen.get_width()`/`get_height()`を使用しているため、全画面サイズに自動対応
+
+### 補足
+- 全画面モードから抜けるにはESCキーを押すか、バトル終了まで待つ必要があります
+- 描画スケールは画面サイズに応じて自動調整されます
+
+---
+
+## 2025-10-03 (修正48): BattleTurnダメージ計算の型エラー修正
+
+### 変更内容
+ダメージ計算で浮動小数点数が生成され、BattleTurnモデルのバリデーションエラーが発生していた問題を修正しました。
+
+**変更ファイル:**
+- `src/services/battle_engine.py` - ダメージ計算の整数変換
+
+### 主な修正内容
+
+#### エラー内容
+```
+ERROR: 2 validation errors for BattleTurn
+damage
+  Input should be a valid integer, got a number with a fractional part [type=int_from_float, input_value=5.5]
+defender_hp_after
+  Input should be a valid integer, got a number with a fractional part [type=int_from_float, input_value=64.5]
+```
+
+#### 問題の原因
+魔法攻撃の防御力計算で`defender.defense * 0.5`が浮動小数点数を生成し、最終的なダメージ計算結果も浮動小数点数になっていました。
+
+#### 修正内容
+
+**変更前（問題あり）:**
+```python
+if action_type == "magic":
+    base_damage = attacker.magic + random.randint(-10, 10)
+    effective_defense = max(0, defender.defense * 0.5)  # 浮動小数点数
+else:
+    base_damage = attacker.attack + random.randint(-15, 15)
+    effective_defense = defender.defense
+
+damage = max(1, base_damage - effective_defense + random.randint(-5, 5))  # 浮動小数点数になる可能性
+```
+
+**変更後（修正済み）:**
+```python
+if action_type == "magic":
+    base_damage = attacker.magic + random.randint(-10, 10)
+    effective_defense = int(max(0, defender.defense * 0.5))  # 整数に変換
+else:
+    base_damage = attacker.attack + random.randint(-15, 15)
+    effective_defense = defender.defense
+
+damage = int(max(1, base_damage - effective_defense + random.randint(-5, 5)))  # 整数に変換
+```
+
+### 期待される効果
+- BattleTurnモデルのバリデーションエラーが解消
+- ダメージ計算が常に整数値を返すように保証
+- 戦闘処理が正常に動作
+
+---
+
+## 2025-10-03 (修正47): リザルト画面自動クローズ時間の変更
+
+### 変更内容
+バトル終了後のリザルト画面の自動クローズ時間を3秒から5秒に変更しました。結果をより確認しやすくなります。
+
+**変更ファイル:**
+- `src/services/battle_engine.py` - リザルト画面の自動クローズ時間
+
+### 主な修正内容
+
+**変更前:**
+```python
+# Wait for user input or auto-close after 3 seconds
+auto_close_time = 3.0  # Auto-close after 3 seconds
+```
+
+**変更後:**
+```python
+# Wait for user input or auto-close after 5 seconds
+auto_close_time = 5.0  # Auto-close after 5 seconds
+```
+
+### 期待される効果
+- リザルト画面の表示時間が2秒延長され、結果を確認しやすくなる
+- ユーザーが手動でクローズすることも可能（ESCキーまたはクリック）
+
+---
+
+## 2025-10-03 (修正46): 全画面状態の子ウィンドウへの継承機能
+
+### 変更内容
+親ウィンドウが全画面表示の場合、新しく開く子ウィンドウも全画面表示で開くように改善しました。これにより、全画面モードでの操作性が向上します。
+
+**変更ファイル:**
+- `src/ui/main_menu.py` - 全画面状態継承機能の追加
+
+### 主な修正内容
+
+#### 全画面状態継承関数の追加
+
+```python
+def inherit_fullscreen_state(parent_window, child_window):
+    """
+    Inherit fullscreen state from parent window to child window
+
+    Args:
+        parent_window: Parent Tk or Toplevel window
+        child_window: Child Toplevel window
+    """
+    try:
+        # Get fullscreen state from parent
+        is_fullscreen = parent_window.attributes('-fullscreen')
+
+        if is_fullscreen:
+            # Apply fullscreen to child window
+            child_window.attributes('-fullscreen', True)
+            logger.debug(f"Applied fullscreen state to child window")
+    except Exception as e:
+        logger.debug(f"Could not inherit fullscreen state: {e}")
+```
+
+#### 適用されたウィンドウクラス
+
+以下のすべてのウィンドウクラスで全画面状態を継承するようになりました:
+
+1. **CharacterRegistrationDialog** - キャラクター登録ダイアログ
+2. **StatsWindow** - 統計情報ウィンドウ
+3. **BattleHistoryWindow** - バトル履歴ウィンドウ
+4. **SettingsWindow** - 設定ウィンドウ
+5. **EndlessBattleWindow** - エンドレスバトルウィンドウ
+
+各ウィンドウの`__init__`メソッドで以下のように呼び出し:
+
+```python
+# Inherit fullscreen state from parent
+inherit_fullscreen_state(parent, self.window)
+```
+
+### 期待される効果
+- 全画面モードでアプリを使用している際、サブウィンドウも自動的に全画面で表示される
+- ウィンドウ表示の一貫性が向上
+- ユーザーエクスペリエンスの改善
+
+### 使用方法
+1. メインウィンドウを全画面表示にする（F11キーなど）
+2. 任意のサブウィンドウ（統計、履歴、設定など）を開く
+3. サブウィンドウも自動的に全画面表示で開く
+
+---
+
+## 2025-10-02 (修正45): エンドレスモードのBattleHistory保存問題の修正
+
+### 変更内容
+エンドレスバトルモードで戦闘結果がBattleHistoryシートに保存されていなかった問題を修正しました。通常の戦闘と同様に、戦闘履歴とランキングを記録するようになります。
+
+**変更ファイル:**
+- `src/ui/main_menu.py` - EndlessBattleWindowクラスの戦闘保存処理
+- `src/services/endless_battle_engine.py` - 戦闘結果にファイター名を追加
+
+### 主な修正内容
+
+#### 問題の原因
+エンドレスバトルでは`save_battle()`のみを呼んでいましたが、このメソッドはキャラクターのステータス更新のみを行い、戦闘履歴は保存しません。通常の戦闘では`record_battle_history()`を別途呼んでいますが、エンドレスバトルではこの処理が欠けていました。
+
+#### main_menu.pyの修正
+
+**変更前（問題あり）:**
+```python
+# Save battle to database
+if self.db_manager.save_battle(result['battle']):
+    logger.info(f"Endless battle saved: {result['battle'].id}")
+
+# Schedule next battle
+self.window.after(1000, self._start_battle_loop)
+```
+
+**変更後（修正済み）:**
+```python
+# Save battle to database
+battle = result['battle']
+if self.db_manager.save_battle(battle):
+    logger.info(f"Endless battle saved: {battle.id}")
+
+# Record battle history to Google Sheets (online mode only)
+if isinstance(self.db_manager, SheetsManager) and self.db_manager.online_mode:
+    battle_data = {
+        'battle_id': battle.id,
+        'fighter1_id': battle.character1_id,
+        'fighter2_id': battle.character2_id,
+        'fighter1_name': result.get('fighter1_name', ''),
+        'fighter2_name': result.get('fighter2_name', ''),
+        'winner_id': battle.winner_id,
+        'winner_name': result.get('winner_name', ''),
+        'total_turns': len(battle.turns),
+        'duration': battle.duration,
+        'f1_final_hp': battle.char1_final_hp,
+        'f2_final_hp': battle.char2_final_hp,
+        'f1_damage_dealt': battle.char1_damage_dealt,
+        'f2_damage_dealt': battle.char2_damage_dealt,
+        'result_type': battle.result_type,
+        'battle_log': battle.battle_log
+    }
+
+    if self.db_manager.record_battle_history(battle_data):
+        logger.info("Endless battle history recorded to Google Sheets")
+    else:
+        logger.warning("Failed to record endless battle history")
+
+    # Update rankings after battle
+    if self.db_manager.update_rankings():
+        logger.info("Rankings updated successfully")
+    else:
+        logger.warning("Failed to update rankings")
+
+# Schedule next battle
+self.window.after(1000, self._start_battle_loop)
+```
+
+#### endless_battle_engine.pyの修正
+
+戦闘結果にファイター名とウィナー名を追加:
+
+```python
+# Store battle participants (before champion might change)
+fighter1 = self.current_champion
+fighter2 = challenger
+
+# ... battle execution ...
+
+return {
+    'status': 'battle_complete',
+    'battle': battle,
+    'champion': self.current_champion,
+    'champion_wins': self.champion_wins,
+    'remaining_count': len(self.participants),
+    'battle_count': self.battle_count,
+    'winner': winner,
+    'loser': loser,
+    'fighter1_name': fighter1.name,      # 追加
+    'fighter2_name': fighter2.name,      # 追加
+    'winner_name': winner_name           # 追加
+}
+```
+
+### 期待される効果
+- エンドレスバトルの戦闘結果がBattleHistoryシートに記録される
+- エンドレスバトル後にランキングが自動更新される
+- 通常の戦闘とエンドレスバトルで同じデータ形式で履歴が保存される
+
+---
+
+## 2025-10-02 (修正44): Google Drive画像アップロード時の透過情報保持
+
+### 変更内容
+LINE Botから画像をGoogle Driveにアップロードする際、すべてJPEG形式に変換されて透過情報が失われていた問題を修正しました。PNG形式の画像は透過情報を保持したまま圧縮・アップロードされるようになります。
+
+**変更ファイル:**
+- `server/server.js` - 画像形式判定と適切な圧縮処理
+
+### 主な修正内容
+
+#### 問題の原因
+```javascript
+// 変更前（問題あり）:
+buffer = await sharp(buffer)
+  .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
+  .jpeg({ quality: 80 })  // すべてJPEGに変換
+  .toBuffer();
+
+const gasResponse = await axios.post(process.env.GAS_WEBHOOK_URL, {
+  image: buffer.toString('base64'),
+  mimeType: 'image/jpeg',  // 常にJPEG
+  filename: `line_${messageId}.jpg`,
+  // ...
+});
+```
+
+すべての画像がJPEG形式に変換されるため、PNG画像の透過情報が失われていました。
+
+#### 修正内容
+
+**画像形式の判定と適切な圧縮:**
+```javascript
+const contentType = resp.headers['content-type'] || 'image/jpeg';
+const ext = contentType.split('/')[1] || 'jpg';
+const isPng = contentType === 'image/png' || ext === 'png';
+
+let finalMimeType = contentType;
+let finalFilename = `line_${messageId}.${ext}`;
+
+const sharpImage = sharp(buffer)
+  .resize(1024, 1024, {
+    fit: 'inside',
+    withoutEnlargement: true
+  });
+
+if (isPng) {
+  // PNG形式: 透過情報を保持して圧縮
+  buffer = await sharpImage
+    .png({ quality: 80, compressionLevel: 8 })
+    .toBuffer();
+  finalMimeType = 'image/png';
+  finalFilename = `line_${messageId}.png`;
+} else {
+  // JPEG形式: JPEG品質80%で圧縮
+  buffer = await sharpImage
+    .jpeg({ quality: 80 })
+    .toBuffer();
+  finalMimeType = 'image/jpeg';
+  finalFilename = `line_${messageId}.jpg`;
+}
+
+const gasResponse = await axios.post(process.env.GAS_WEBHOOK_URL, {
+  image: buffer.toString('base64'),
+  mimeType: finalMimeType,  // 元の形式を維持
+  filename: finalFilename,   // 適切な拡張子
+  // ...
+});
+```
+
+### 期待される効果
+- PNG画像の透過情報が保持される
+- JPEG画像は引き続き効率的に圧縮される
+- 元の画像形式に応じた適切な処理が行われる
+- ファイル名と拡張子が正しく設定される
+
+### 補足
+- Python側（`sheets_manager.py`）は既に正しく実装されており、PNG形式を認識して適切にアップロードしています
+- `image_processor.py`もRGBA画像を正しく保存しています
+- 問題はLINE Botの`server.js`のみでした
+
+---
+
 ## 2025-10-02 (修正43): リフレッシュボタンSegmentation Fault問題の修正
 
 ### 変更内容

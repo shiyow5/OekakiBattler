@@ -251,27 +251,27 @@ class ImageProcessor:
             is_valid, message = self.validate_image(input_path)
             if not is_valid:
                 return False, message, None
-            
+
             # Load image
             image = self.load_image(input_path)
             if image is None:
                 return False, "Failed to load image", None
-            
+
             # Extract character
             extracted = self.extract_character(image)
             if extracted is None:
                 return False, "Failed to extract character", None
-            
+
             # Preprocess
             processed = self.preprocess_image(extracted)
-            
-            # Save sprite
+
+            # Save sprite with transparency
             output_path = Path(output_dir) / f"{character_name}_sprite.png"
             if not self.save_sprite(processed, str(output_path)):
                 return False, "Failed to save sprite", None
-            
+
             return True, "Character processing completed successfully", str(output_path)
-            
+
         except Exception as e:
             logger.error(f"Error in character processing pipeline: {e}")
             return False, f"Processing error: {e}", None

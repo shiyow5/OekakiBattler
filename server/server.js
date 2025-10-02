@@ -95,18 +95,37 @@ async function handleEvent(event) {
     let buffer = Buffer.from(resp.data);
     const contentType = resp.headers['content-type'] || 'image/jpeg';
     const ext = contentType.split('/')[1] || 'jpg';
-    const filename = `line_${messageId}.${ext}`;
+    const isPng = contentType === 'image/png' || ext === 'png';
 
-    // 画像を圧縮してサイズを削減（最大1024px、JPEG品質80%）
+    let finalMimeType = contentType;
+    let finalFilename = `line_${messageId}.${ext}`;
+
+    // 画像を圧縮してサイズを削減（最大1024px）
+    // PNG形式の場合は透過情報を保持
     try {
-      buffer = await sharp(buffer)
+      const sharpImage = sharp(buffer)
         .resize(1024, 1024, {
           fit: 'inside',
           withoutEnlargement: true
-        })
-        .jpeg({ quality: 80 })
-        .toBuffer();
-      console.log(`Image compressed to ${buffer.length} bytes`);
+        });
+
+      if (isPng) {
+        // PNG形式: 透過情報を保持して圧縮
+        buffer = await sharpImage
+          .png({ quality: 80, compressionLevel: 8 })
+          .toBuffer();
+        finalMimeType = 'image/png';
+        finalFilename = `line_${messageId}.png`;
+      } else {
+        // JPEG形式: JPEG品質80%で圧縮
+        buffer = await sharpImage
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        finalMimeType = 'image/jpeg';
+        finalFilename = `line_${messageId}.jpg`;
+      }
+
+      console.log(`Image compressed to ${buffer.length} bytes (${finalMimeType})`);
     } catch (compressError) {
       console.warn('Image compression failed, using original:', compressError);
     }
@@ -114,8 +133,8 @@ async function handleEvent(event) {
     // GAS に画像を送る（Base64 + mime + filename + secret + source）
     const gasResponse = await axios.post(process.env.GAS_WEBHOOK_URL, {
       image: buffer.toString('base64'),
-      mimeType: 'image/jpeg',  // 圧縮後はJPEG形式
-      filename: `line_${messageId}.jpg`,
+      mimeType: finalMimeType,
+      filename: finalFilename,
       secret: process.env.SHARED_SECRET,
       source: 'linebot',
       action: 'upload',
