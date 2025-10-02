@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 
 cd server/
-npm install express @line/bot-sdk axios dotenv
+npm install express @line/bot-sdk axios dotenv sharp
 
 node server.js &
 NODE_PID=$!

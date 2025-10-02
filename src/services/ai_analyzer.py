@@ -142,6 +142,11 @@ class AIAnalyzer:
 あなたは世界的に有名なゲームデザイナーとバランス調整の専門家です。
 手描きキャラクターの絵を詳細に分析し、視覚的特徴からゲーム内での能力値を科学的に決定してください。
 
+## キャラクター名の生成:
+- 見た目の特徴を反映した日本語の名前を付けてください
+- 10文字以内で覚えやすい名前にしてください
+- 例: 「炎の戦士」「氷の魔法使い」「疾風の剣士」「鋼鉄の騎士」など
+
 ## 詳細分析基準:
 
 ### 1. 体力 (HP: 50-150)
@@ -184,13 +189,17 @@ class AIAnalyzer:
 - 説明文: そのキャラの最も印象的な特徴を30文字以内で
 
 ## 出力形式:
-各ステータスの数値と、分析理由を含んだ簡潔な説明文を返してください。
+キャラクター名、各ステータスの数値、分析理由を含んだ簡潔な説明文を返してください。
         """
     
     def _get_simple_analysis_prompt(self) -> str:
         """Get simplified prompt for basic analysis"""
         return """
 手描きキャラクターを見て、ゲーム用のステータスを決めてください。
+
+名前:
+- 見た目の特徴を反映した日本語の名前（10文字以内）
+- 例: 「勇者」「魔法使い」「剣士」など
 
 判定基準:
 - HP (50-150): 体の大きさ・頑丈さ
@@ -205,6 +214,13 @@ class AIAnalyzer:
     def _validate_and_adjust_stats(self, stats_data: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and adjust generated stats to ensure they're within acceptable ranges"""
         try:
+            # Validate and ensure name exists
+            if 'name' not in stats_data or not stats_data['name']:
+                stats_data['name'] = "未知のキャラクター"
+            else:
+                # Trim name to 30 characters max
+                stats_data['name'] = str(stats_data['name'])[:30]
+
             # Define valid ranges
             ranges = {
                 'hp': (50, 150),
@@ -213,7 +229,7 @@ class AIAnalyzer:
                 'speed': (40, 130),
                 'magic': (10, 100)
             }
-            
+
             # Validate and clamp values
             for stat, (min_val, max_val) in ranges.items():
                 if stat in stats_data:
@@ -226,7 +242,7 @@ class AIAnalyzer:
                 else:
                     # Generate default value if missing
                     stats_data[stat] = (min_val + max_val) // 2
-            
+
             # Ensure description exists and is reasonable
             if 'description' not in stats_data or not stats_data['description']:
                 stats_data['description'] = "個性的なキャラクター"
@@ -266,6 +282,7 @@ class AIAnalyzer:
             
             # Basic heuristics based on image properties
             base_stats = {
+                'name': "未知のキャラクター",
                 'hp': 100,  # Default middle value
                 'attack': 75,
                 'defense': 60,
@@ -301,6 +318,7 @@ class AIAnalyzer:
     def _get_default_stats(self) -> Dict[str, Any]:
         """Get default balanced stats"""
         return {
+            'name': "バランス戦士",
             'hp': 100,
             'attack': 75,
             'defense': 60,

@@ -14,7 +14,9 @@ from src.services.database_manager import DatabaseManager
 from src.services.image_processor import ImageProcessor
 from src.services.ai_analyzer import AIAnalyzer
 from src.services.battle_engine import BattleEngine
+from src.services.endless_battle_engine import EndlessBattleEngine
 from src.models import Character
+from src.utils.progress_dialog import AIGenerationDialog
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -55,6 +57,8 @@ class MainMenuWindow:
         self.ai_analyzer = AIAnalyzer()
         logger.info("MainMenuWindow.__init__: Initializing battle engine")
         self.battle_engine = BattleEngine()
+        logger.info("MainMenuWindow.__init__: Initializing endless battle engine")
+        self.endless_battle_engine = EndlessBattleEngine(self.db_manager, self.battle_engine)
         logger.info("MainMenuWindow.__init__: All services initialized")
         
         # Apply current settings to battle engine
@@ -85,9 +89,11 @@ class MainMenuWindow:
         self._setup_styles()
         logger.info("MainMenuWindow.__init__: Creating widgets")
         self._create_widgets()
-        logger.info("MainMenuWindow.__init__: Loading characters")
-        self._load_characters()
-        
+
+        # Defer character loading to allow UI to fully initialize (prevents segfault)
+        logger.info("MainMenuWindow.__init__: Scheduling character loading")
+        self.root.after(100, self._load_characters)
+
         logger.info("Main menu window initialized")
     
     def _setup_styles(self):
@@ -382,7 +388,24 @@ class MainMenuWindow:
                 text="Random Battle",
                 command=self._random_battle
             ).pack(pady=5, fill=tk.X)
-        
+
+        logger.info("MainMenuWindow._create_battle_panel: Creating endless battle button")
+        # Endless battle button
+        try:
+            ttk.Button(
+                battle_frame,
+                text="♾️ Endless Battle",
+                command=self._start_endless_battle
+            ).pack(pady=5, fill=tk.X)
+            logger.info("MainMenuWindow._create_battle_panel: Endless battle button created successfully")
+        except Exception as e:
+            logger.error(f"MainMenuWindow._create_battle_panel: Error creating endless battle button: {e}")
+            ttk.Button(
+                battle_frame,
+                text="Endless Battle",
+                command=self._start_endless_battle
+            ).pack(pady=5, fill=tk.X)
+
         logger.info("MainMenuWindow._create_battle_panel: Battle panel creation complete")
     
     def _create_status_panel(self, parent):
@@ -400,15 +423,94 @@ class MainMenuWindow:
         status_label.grid(row=1, column=0, sticky=tk.W)
     
     def _load_characters(self):
-        """Load characters from database"""
+        """Load characters from database with AI generation progress dialog"""
         try:
             self.status_var.set("Loading characters...")
-            self.characters = self.db_manager.get_all_characters()
-            
+
+            # Load characters in a separate thread to avoid blocking UI
+            def load_in_thread():
+                try:
+                    # Progress dialog for AI generation
+                    progress_dialog = None
+
+                    def progress_callback(current, total, char_name, step):
+                        """Callback to update progress dialog"""
+                        nonlocal progress_dialog
+
+                        # Schedule UI updates on the main thread
+                        def update_ui():
+                            nonlocal progress_dialog
+                            # Show dialog on first call (ensure root window is ready)
+                            if progress_dialog is None and total > 0:
+                                try:
+                                    # Make sure the root window is fully initialized
+                                    self.root.update_idletasks()
+                                    progress_dialog = AIGenerationDialog(self.root)
+                                    progress_dialog.show(total)
+                                except Exception as e:
+                                    logger.warning(f"Failed to create progress dialog: {e}")
+                                    # Continue without dialog, just log
+                                    logger.info(f"AI Generation: {current}/{total} - {step}")
+                                    return
+
+                            # Update progress
+                            if progress_dialog:
+                                try:
+                                    progress_dialog.update_progress(current, total, char_name, step)
+                                except Exception as e:
+                                    logger.warning(f"Failed to update progress dialog: {e}")
+                            else:
+                                # Log progress if dialog unavailable
+                                logger.info(f"AI Generation: {current}/{total} - {step} - {char_name or ''}")
+
+                        # Execute UI update on main thread
+                        self.root.after(0, update_ui)
+
+                    # Load characters (with AI generation if needed)
+                    if isinstance(self.db_manager, SheetsManager):
+                        # Online mode - pass progress callback for AI generation
+                        characters = self.db_manager.get_all_characters(progress_callback=progress_callback)
+                    else:
+                        # Offline mode - no AI generation
+                        characters = self.db_manager.get_all_characters()
+
+                    # Schedule final UI update on main thread
+                    def finalize_ui():
+                        nonlocal progress_dialog
+
+                        # Close progress dialog if it was shown
+                        if progress_dialog:
+                            try:
+                                progress_dialog.close()
+                            except Exception as e:
+                                logger.warning(f"Failed to close progress dialog: {e}")
+
+                        # Update UI with loaded characters
+                        self._update_character_display(characters)
+
+                    self.root.after(0, finalize_ui)
+
+                except Exception as e:
+                    logger.error(f"Error in load thread: {e}")
+                    self.root.after(0, lambda: self.status_var.set(f"Error loading characters: {e}"))
+
+            # Start loading in background thread
+            threading.Thread(target=load_in_thread, daemon=True).start()
+
+        except Exception as e:
+            logger.error(f"Error loading characters: {e}")
+            self.status_var.set(f"Error loading characters: {e}")
+            messagebox.showerror("Error", f"Failed to load characters: {e}")
+
+    def _update_character_display(self, characters):
+        """Update character display on UI thread (called from main thread)"""
+        try:
+            self.characters = characters
+
             # Clear treeview
             for item in self.char_tree.get_children():
                 self.char_tree.delete(item)
-            
+
             # Populate treeview
             for char in self.characters:
                 win_rate = f"{char.win_rate:.1f}%" if char.battle_count > 0 else "N/A"
@@ -680,19 +782,49 @@ class MainMenuWindow:
             if len(self.characters) < 2:
                 messagebox.showwarning("Warning", "Need at least 2 characters for battle")
                 return
-            
+
             import random
             fighters = random.sample(self.characters, 2)
-            
+
             self.fighter1_var.set(fighters[0].name)
             self.fighter2_var.set(fighters[1].name)
-            
+
             self._start_battle()
-            
+
         except Exception as e:
             logger.error(f"Error starting random battle: {e}")
             messagebox.showerror("Error", f"Failed to start random battle: {e}")
-    
+
+    def _start_endless_battle(self):
+        """Start endless tournament-style battle"""
+        try:
+            if len(self.characters) < 2:
+                messagebox.showwarning("Warning", "Need at least 2 characters for endless battle")
+                return
+
+            # Apply latest settings to battle engine
+            try:
+                from src.services.settings_manager import settings_manager
+                settings_manager.apply_to_battle_engine(self.battle_engine)
+            except Exception as e:
+                logger.warning(f"Could not apply settings to battle engine: {e}")
+
+            # Start endless battle mode
+            result = self.endless_battle_engine.start_endless_battle()
+
+            if result is None:
+                messagebox.showerror("Error", "Failed to start endless battle mode")
+                return
+
+            logger.info(f"Endless battle started with champion: {result['champion'].name}")
+
+            # Open endless battle window
+            EndlessBattleWindow(self.root, self.endless_battle_engine, self.db_manager, self.visual_mode_var.get())
+
+        except Exception as e:
+            logger.error(f"Error starting endless battle: {e}")
+            messagebox.showerror("Error", f"Failed to start endless battle: {e}")
+
     def _show_statistics(self):
         """Show statistics window"""
         try:
@@ -947,9 +1079,21 @@ class CharacterRegistrationDialog:
                 speed = int(self.speed_var.get())
                 magic = int(self.magic_var.get())
 
-                # Validate stat ranges (1-100)
-                if not all(1 <= stat <= 100 for stat in [hp, attack, defense, speed, magic]):
-                    messagebox.showwarning("Warning", "All stats must be between 1 and 100")
+                # Validate stat ranges (each stat has different range)
+                if not (50 <= hp <= 150):
+                    messagebox.showwarning("Warning", "HP must be between 50 and 150")
+                    return
+                if not (30 <= attack <= 120):
+                    messagebox.showwarning("Warning", "Attack must be between 30 and 120")
+                    return
+                if not (20 <= defense <= 100):
+                    messagebox.showwarning("Warning", "Defense must be between 20 and 100")
+                    return
+                if not (40 <= speed <= 130):
+                    messagebox.showwarning("Warning", "Speed must be between 40 and 130")
+                    return
+                if not (10 <= magic <= 100):
+                    messagebox.showwarning("Warning", "Magic must be between 10 and 100")
                     return
 
             except ValueError:
@@ -2244,7 +2388,185 @@ class SettingsWindow:
                                    "設定の保存に失敗しました。")
             
             self.window.destroy()
-            
+
         except Exception as e:
             messagebox.showerror("エラー", f"設定の保存に失敗しました: {e}")
-            logger.error(f"Error saving settings: {e}")
+
+
+class EndlessBattleWindow:
+    """Window for endless tournament-style battles"""
+
+    def __init__(self, parent, endless_engine, db_manager, visual_mode: bool = True):
+        self.endless_engine = endless_engine
+        self.db_manager = db_manager
+        self.visual_mode = visual_mode
+        self.is_running = True
+        self.check_interval = 3000  # Check for new characters every 3 seconds
+
+        self.window = tk.Toplevel(parent)
+        self.window.title("♾️ エンドレスバトル")
+        self.window.geometry("600x500")
+        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Center the window
+        self.window.transient(parent)
+
+        self._create_widgets()
+        self._start_battle_loop()
+
+    def _create_widgets(self):
+        """Create endless battle window widgets"""
+        main_frame = ttk.Frame(self.window, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        title_label = ttk.Label(main_frame, text="♾️ エンドレスバトル", font=("Arial", 18, "bold"))
+        title_label.pack(pady=(0, 20))
+
+        # Champion info frame
+        self.champion_frame = ttk.LabelFrame(main_frame, text="🏆 現在のチャンピオン", padding=10)
+        self.champion_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.champion_name_var = tk.StringVar()
+        self.champion_wins_var = tk.StringVar()
+
+        ttk.Label(self.champion_frame, textvariable=self.champion_name_var, font=("Arial", 14, "bold")).pack()
+        ttk.Label(self.champion_frame, textvariable=self.champion_wins_var, font=("Arial", 11)).pack()
+
+        # Status frame
+        status_frame = ttk.LabelFrame(main_frame, text="📊 ステータス", padding=10)
+        status_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.battle_count_var = tk.StringVar()
+        self.remaining_var = tk.StringVar()
+        self.status_var = tk.StringVar()
+
+        ttk.Label(status_frame, textvariable=self.battle_count_var).pack(anchor=tk.W)
+        ttk.Label(status_frame, textvariable=self.remaining_var).pack(anchor=tk.W)
+        ttk.Label(status_frame, textvariable=self.status_var, font=("Arial", 10, "italic")).pack(anchor=tk.W, pady=(10, 0))
+
+        # Battle log
+        log_frame = ttk.LabelFrame(main_frame, text="📝 バトルログ", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(log_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.log_text = tk.Text(log_frame, height=10, wrap=tk.WORD, yscrollcommand=scrollbar.set)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.log_text.yview)
+
+        # Control buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X)
+
+        self.pause_button = ttk.Button(button_frame, text="⏸️ 一時停止", command=self._toggle_pause)
+        self.pause_button.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(button_frame, text="❌ 終了", command=self._on_close).pack(side=tk.LEFT, padx=5)
+
+    def _start_battle_loop(self):
+        """Start the endless battle loop"""
+        if not self.is_running:
+            return
+
+        try:
+            # Run next battle
+            result = self.endless_engine.run_next_battle(self.visual_mode)
+
+            if result is None:
+                self._log("エラー: バトルを実行できませんでした")
+                return
+
+            if result['status'] == 'waiting':
+                # No challengers available, waiting for new characters
+                self._update_waiting_state(result)
+                # Schedule next check
+                self.window.after(self.check_interval, self._start_battle_loop)
+
+            elif result['status'] == 'battle_complete':
+                # Battle completed, save and continue
+                self._update_battle_complete(result)
+
+                # Save battle to database
+                if self.db_manager.save_battle(result['battle']):
+                    logger.info(f"Endless battle saved: {result['battle'].id}")
+
+                # Schedule next battle
+                self.window.after(1000, self._start_battle_loop)
+
+        except Exception as e:
+            logger.error(f"Error in endless battle loop: {e}")
+            self._log(f"エラー: {e}")
+            self.window.after(self.check_interval, self._start_battle_loop)
+
+    def _update_waiting_state(self, result):
+        """Update UI for waiting state"""
+        champion = result['champion']
+        self.champion_name_var.set(champion.name)
+        self.champion_wins_var.set(f"連勝数: {result['champion_wins']}")
+
+        status = self.endless_engine.get_status()
+        self.battle_count_var.set(f"総バトル数: {status['total_battles']}")
+        self.remaining_var.set(f"待機中の挑戦者: 0")
+        self.status_var.set("新しい挑戦者を待っています...")
+
+        self._log(result['message'])
+
+    def _update_battle_complete(self, result):
+        """Update UI after battle completion"""
+        champion = result['champion']
+        battle = result['battle']
+
+        self.champion_name_var.set(champion.name)
+        self.champion_wins_var.set(f"連勝数: {result['champion_wins']}")
+
+        self.battle_count_var.set(f"総バトル数: {result['battle_count']}")
+        self.remaining_var.set(f"待機中の挑戦者: {result['remaining_count']}")
+
+        # Log battle result
+        if result['winner']:
+            winner_name = result['winner'].name
+            loser_name = result['loser'].name
+
+            if result['winner'] == champion:
+                msg = f"🏆 {winner_name} が {loser_name} を倒しました！チャンピオン防衛成功！"
+                self.status_var.set("チャンピオンが勝利！")
+            else:
+                msg = f"👑 新チャンピオン誕生！{winner_name} が {loser_name} を倒しました！"
+                self.status_var.set("新チャンピオン誕生！")
+        else:
+            msg = "引き分け"
+            self.status_var.set("引き分け")
+
+        self._log(msg)
+
+    def _log(self, message: str):
+        """Add message to battle log"""
+        self.log_text.insert(tk.END, f"{message}\n")
+        self.log_text.see(tk.END)
+
+    def _toggle_pause(self):
+        """Toggle pause state"""
+        self.is_running = not self.is_running
+
+        if self.is_running:
+            self.pause_button.config(text="⏸️ 一時停止")
+            self._log("バトル再開")
+            self._start_battle_loop()
+        else:
+            self.pause_button.config(text="▶️ 再開")
+            self._log("バトル一時停止")
+
+    def _on_close(self):
+        """Handle window close"""
+        if messagebox.askyesno("確認", "エンドレスバトルを終了しますか？"):
+            self.is_running = False
+            result = self.endless_engine.stop()
+
+            # Show final stats
+            final_msg = f"エンドレスバトル終了\n総バトル数: {result['total_battles']}\n最終チャンピオン: {result['final_champion'].name}\nチャンピオン連勝数: {result['champion_wins']}"
+            messagebox.showinfo("バトル終了", final_msg)
+
+            self.window.destroy()

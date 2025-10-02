@@ -17,6 +17,7 @@ from datetime import datetime
 from PIL import Image
 from src.models import Character, Battle
 from config.settings import Settings
+from src.services.ai_analyzer import AIAnalyzer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -215,23 +216,34 @@ class SheetsManager:
                 result = response.json()
                 if result.get('ok'):
                     url = result.get('url')
-                    logger.info(f"Successfully uploaded {file_name} via GAS: {url}")
+                    logger.info(f"✓ Successfully uploaded {file_name} via GAS: {url}")
                     return url
                 else:
-                    logger.error(f"GAS upload failed: {result.get('error')}")
+                    error_msg = result.get('error', 'Unknown error')
+                    logger.error(f"✗ GAS upload failed: {error_msg}")
+                    logger.error(f"  GAS response: {result}")
                     return None
             else:
-                logger.error(f"GAS request failed with status {response.status_code}")
+                logger.error(f"✗ GAS request failed with status {response.status_code}")
+                logger.error(f"  Response: {response.text[:200]}")
                 return None
 
+        except requests.exceptions.Timeout:
+            logger.error(f"✗ GAS upload timeout after 30 seconds for {file_name}")
+            return None
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"✗ GAS connection error: {e}")
+            logger.error(f"  Check if GAS_WEBHOOK_URL is correct: {Settings.GAS_WEBHOOK_URL}")
+            return None
         except Exception as e:
-            logger.error(f"Failed to upload file via GAS: {e}")
+            logger.error(f"✗ Failed to upload file via GAS: {e}")
+            logger.error(f"  File: {file_path}")
+            logger.error(f"  GAS URL: {Settings.GAS_WEBHOOK_URL}")
             return None
 
     def upload_to_drive(self, file_path: str, file_name: str = None) -> Optional[str]:
         """
-        Upload a file to Google Drive and return its public URL
-        Tries GAS upload first (uses user's storage), falls back to direct API (service account storage)
+        Upload a file to Google Drive via GAS and return its public URL
 
         Args:
             file_path: Local path to the file
@@ -245,62 +257,131 @@ class SheetsManager:
             logger.debug("Offline mode: Skipping Drive upload")
             return None
 
-        # Try GAS upload first (recommended - uses user's storage)
+        # Upload via GAS (uses user's storage)
         gas_url = self.upload_to_drive_via_gas(file_path, file_name)
         if gas_url:
             return gas_url
+        else:
+            logger.error(f"Failed to upload file to Google Drive: {file_path}")
+            return None
 
-        # Fallback to direct API upload (may fail with storageQuotaExceeded)
-        logger.info("Attempting direct API upload as GAS upload unavailable")
+    def _extract_drive_file_id(self, url: str) -> Optional[str]:
+        """
+        Extract Google Drive file ID from URL
 
+        Args:
+            url: Google Drive URL
+
+        Returns:
+            File ID or None if not a valid Drive URL
+        """
+        if not url or not isinstance(url, str):
+            return None
+
+        # Pattern 1: https://drive.google.com/uc?export=view&id=FILE_ID
+        if 'drive.google.com/uc' in url and 'id=' in url:
+            try:
+                file_id = url.split('id=')[1].split('&')[0]
+                return file_id
+            except Exception:
+                pass
+
+        # Pattern 2: https://drive.google.com/file/d/FILE_ID/view
+        if 'drive.google.com/file/d/' in url:
+            try:
+                file_id = url.split('/file/d/')[1].split('/')[0]
+                return file_id
+            except Exception:
+                pass
+
+        # Pattern 3: https://drive.google.com/open?id=FILE_ID
+        if 'drive.google.com/open' in url and 'id=' in url:
+            try:
+                file_id = url.split('id=')[1].split('&')[0]
+                return file_id
+            except Exception:
+                pass
+
+        return None
+
+    def delete_from_drive_via_gas(self, file_id: str) -> bool:
+        """
+        Delete a file from Google Drive via GAS (Google Apps Script)
+        This is necessary when files are owned by the user, not the service account
+
+        Args:
+            file_id: Google Drive file ID
+
+        Returns:
+            True if deletion successful, False otherwise
+        """
         try:
-            path = Path(file_path)
-            if not path.exists():
-                logger.error(f"File not found: {file_path}")
-                return None
+            if not Settings.GAS_WEBHOOK_URL:
+                logger.debug("GAS_WEBHOOK_URL not configured")
+                return False
 
-            # Use provided file_name or original filename
-            if file_name is None:
-                file_name = path.name
-
-            # Determine MIME type
-            mime_type = 'image/png' if path.suffix.lower() in ['.png'] else 'image/jpeg'
-
-            # Read file
-            with open(path, 'rb') as f:
-                file_data = io.BytesIO(f.read())
-
-            # Create file metadata
-            file_metadata = {
-                'name': file_name,
-                'parents': [Settings.DRIVE_FOLDER_ID] if hasattr(Settings, 'DRIVE_FOLDER_ID') and Settings.DRIVE_FOLDER_ID else []
+            payload = {
+                'secret': Settings.GAS_SHARED_SECRET,
+                'action': 'delete',
+                'fileId': file_id
             }
 
-            # Upload file
-            media = MediaIoBaseUpload(file_data, mimetype=mime_type, resumable=True)
-            file = self.drive_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id, webViewLink, webContentLink'
-            ).execute()
+            logger.info(f"Sending delete request to GAS for file: {file_id}")
+            response = requests.post(Settings.GAS_WEBHOOK_URL, json=payload, timeout=30)
 
-            file_id = file.get('id')
-
-            # Make file publicly accessible
-            self.drive_service.permissions().create(
-                fileId=file_id,
-                body={'type': 'anyone', 'role': 'reader'}
-            ).execute()
-
-            # Get public URL for direct access
-            public_url = f"https://drive.google.com/uc?export=view&id={file_id}"
-
-            logger.info(f"Successfully uploaded {file_name} to Google Drive: {public_url}")
-            return public_url
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('ok'):
+                    logger.info(f"✓ Successfully deleted file via GAS: {file_id}")
+                    return True
+                else:
+                    logger.warning(f"GAS delete failed: {result.get('error', 'unknown error')}")
+                    return False
+            else:
+                logger.warning(f"GAS request failed with status {response.status_code}")
+                return False
 
         except Exception as e:
-            logger.error(f"Failed to upload file to Google Drive: {e}")
-            return None
+            logger.warning(f"Failed to delete via GAS: {e}")
+            return False
+
+    def delete_from_drive(self, url: str) -> bool:
+        """
+        Delete a file from Google Drive using its URL via GAS
+
+        Args:
+            url: Google Drive URL of the file to delete
+
+        Returns:
+            True if deletion successful, False otherwise
+        """
+        if not self.online_mode:
+            logger.warning("Offline mode: Skipping Drive deletion")
+            return False
+
+        try:
+            # Extract file ID from URL
+            logger.debug(f"Extracting file ID from URL: {url}")
+            file_id = self._extract_drive_file_id(url)
+            if not file_id:
+                logger.warning(f"Could not extract file ID from URL: {url}")
+                return False
+
+            logger.info(f"Extracted file ID: {file_id}")
+
+            # Delete via GAS (user's account has permission)
+            if self.delete_from_drive_via_gas(file_id):
+                logger.info(f"✓ Successfully deleted file from Google Drive: {file_id}")
+                return True
+            else:
+                logger.warning(f"✗ Failed to delete file from Google Drive: {file_id}")
+                return False
+
+        except Exception as e:
+            logger.error(f"✗ Failed to delete file from Google Drive")
+            logger.error(f"  URL: {url}")
+            logger.error(f"  Error: {e}")
+            return False
 
     def download_from_url(self, url: str, save_path: str) -> bool:
         """
@@ -391,7 +472,9 @@ class SheetsManager:
                 )
                 if uploaded_url:
                     image_url = uploaded_url
-                    logger.info(f"Uploaded original image to Drive: {image_url}")
+                    logger.info(f"✓ Uploaded original image to Drive: {image_url}")
+                else:
+                    logger.warning(f"⚠ Failed to upload original image to Drive, using local path: {character.image_path}")
 
             if character.sprite_path and Path(character.sprite_path).exists():
                 # Upload sprite image
@@ -401,7 +484,9 @@ class SheetsManager:
                 )
                 if uploaded_url:
                     sprite_url = uploaded_url
-                    logger.info(f"Uploaded sprite to Drive: {sprite_url}")
+                    logger.info(f"✓ Uploaded sprite to Drive: {sprite_url}")
+                else:
+                    logger.warning(f"⚠ Failed to upload sprite to Drive, using local path: {character.sprite_path}")
 
             # Prepare row data with Drive URLs
             # Calculate losses and draws from battle_count and win_count
@@ -466,16 +551,60 @@ class SheetsManager:
             logger.error(f"Error getting character: {e}")
             return None
 
-    def get_all_characters(self) -> List[Character]:
-        """Get all characters"""
+    def get_all_characters(self, progress_callback=None) -> List[Character]:
+        """Get all characters and generate stats for empty ones
+
+        Args:
+            progress_callback: Optional callback function(current, total, char_name, step)
+                               to report progress during AI generation
+        """
         try:
             all_records = self.worksheet.get_all_records()
             characters = []
 
+            # First pass: identify characters needing generation
+            records_needing_generation = []
             for record in all_records:
-                char = self._record_to_character(record)
-                if char:
-                    characters.append(char)
+                needs_generation = (
+                    record.get('HP') == 0 or
+                    record.get('HP') == '' or
+                    record.get('Name') == '' or
+                    not record.get('Name')
+                )
+                if needs_generation:
+                    records_needing_generation.append(record)
+
+            # Log total characters needing generation
+            if records_needing_generation:
+                logger.info(f"Found {len(records_needing_generation)} character(s) with empty stats")
+
+            # Second pass: process all records
+            generation_count = 0
+            for record in all_records:
+                needs_generation = (
+                    record.get('HP') == 0 or
+                    record.get('HP') == '' or
+                    record.get('Name') == '' or
+                    not record.get('Name')
+                )
+
+                if needs_generation:
+                    generation_count += 1
+                    logger.info(f"Detected character with empty stats: ID {record.get('ID')}")
+
+                    # Generate stats using AI with progress callback
+                    generated_char = self._generate_stats_for_character(
+                        record,
+                        progress_callback=progress_callback,
+                        current=generation_count,
+                        total=len(records_needing_generation)
+                    )
+                    if generated_char:
+                        characters.append(generated_char)
+                else:
+                    char = self._record_to_character(record)
+                    if char:
+                        characters.append(char)
 
             logger.info(f"Retrieved {len(characters)} characters")
             return characters
@@ -505,11 +634,24 @@ class SheetsManager:
                     # Calculate losses from battle_count and win_count
                     losses = character.battle_count - character.win_count
 
+                    # Preserve existing Image URL and Sprite URL from the sheet (don't overwrite with local paths)
+                    existing_image_url = record.get('Image URL', '')
+                    existing_sprite_url = record.get('Sprite URL', '')
+
+                    # Only use character's paths if they are URLs (http/https), otherwise keep existing
+                    image_url = existing_image_url
+                    sprite_url = existing_sprite_url
+
+                    if character.image_path and (character.image_path.startswith('http://') or character.image_path.startswith('https://')):
+                        image_url = character.image_path
+                    if character.sprite_path and (character.sprite_path.startswith('http://') or character.sprite_path.startswith('https://')):
+                        sprite_url = character.sprite_path
+
                     row = [
                         character.id,
                         character.name,
-                        character.image_path or '',
-                        character.sprite_path or '',
+                        image_url,  # Preserve existing URL or use new URL (never local path)
+                        sprite_url,  # Preserve existing URL or use new URL (never local path)
                         character.hp,
                         character.attack,
                         character.defense,
@@ -524,7 +666,7 @@ class SheetsManager:
 
                     # Update the row
                     self.worksheet.update(f'A{row_num}:N{row_num}', [row])
-                    logger.info(f"Character updated: {character.name} (ID: {character.id})")
+                    logger.info(f"✓ Character updated: {character.name} (ID: {character.id}) - Image URLs preserved")
                     return True
 
             logger.warning(f"Character not found for update: ID {character.id}")
@@ -534,20 +676,175 @@ class SheetsManager:
             logger.error(f"Error updating character: {e}")
             return False
 
-    def delete_character(self, character_id: int) -> bool:
-        """Delete a character"""
+    def delete_character(self, character_id: int, force_delete: bool = False) -> bool:
+        """
+        Delete a character from Google Sheets
+
+        Args:
+            character_id: ID of character to delete (int or str)
+            force_delete: If True, delete character even if it has battle history
+
+        Returns:
+            True if deletion successful, False otherwise
+        """
         try:
+            # Convert to int for comparison
+            char_id = int(character_id) if isinstance(character_id, str) else character_id
+
+            # Check if character exists in battle history
+            battle_count = self.get_character_battle_count(char_id)
+
+            if battle_count > 0 and not force_delete:
+                logger.warning(f"Cannot delete character {char_id}: has {battle_count} battle(s) in history. Use force_delete=True to override.")
+                return False
+
+            # If force_delete is True and character has battles, delete battle history first
+            if force_delete and battle_count > 0 and self.battle_history_sheet:
+                logger.info(f"Force deleting character {char_id} with {battle_count} battle(s)")
+
+                # Get all battle history records
+                battle_records = self.battle_history_sheet.get_all_records()
+                char_id_str = str(char_id)
+
+                # Find and delete rows in reverse order to avoid index shifting
+                rows_to_delete = []
+                for idx, record in enumerate(battle_records):
+                    fighter1_id = str(record.get('Fighter 1 ID', ''))
+                    fighter2_id = str(record.get('Fighter 2 ID', ''))
+
+                    if fighter1_id == char_id_str or fighter2_id == char_id_str:
+                        # Row number in sheet (accounting for header)
+                        row_num = idx + 2
+                        rows_to_delete.append(row_num)
+
+                # Delete rows in reverse order to avoid index shifting
+                for row_num in sorted(rows_to_delete, reverse=True):
+                    self.battle_history_sheet.delete_rows(row_num)
+
+                logger.info(f"Deleted {len(rows_to_delete)} battle history record(s) for character {char_id}")
+
+            # Delete from Rankings sheet if it exists
+            if self.ranking_sheet:
+                try:
+                    ranking_records = self.ranking_sheet.get_all_records()
+                    char_id_str = str(char_id)
+
+                    # Find and delete ranking rows in reverse order
+                    ranking_rows_to_delete = []
+                    for idx, record in enumerate(ranking_records):
+                        ranking_char_id = str(record.get('Character ID', ''))
+
+                        if ranking_char_id == char_id_str:
+                            # Row number in sheet (accounting for header)
+                            row_num = idx + 2
+                            ranking_rows_to_delete.append(row_num)
+
+                    # Delete rows in reverse order to avoid index shifting
+                    for row_num in sorted(ranking_rows_to_delete, reverse=True):
+                        self.ranking_sheet.delete_rows(row_num)
+
+                    if ranking_rows_to_delete:
+                        logger.info(f"Deleted {len(ranking_rows_to_delete)} ranking record(s) for character {char_id}")
+                except Exception as ranking_e:
+                    logger.warning(f"Error deleting from ranking sheet: {ranking_e}")
+
+            # Delete the character from Characters sheet
             all_records = self.worksheet.get_all_records()
 
             for idx, record in enumerate(all_records):
-                if record.get('ID') == character_id:
+                if record.get('ID') == char_id:
+                    # Get Drive URLs directly from the sheet record (not from character object)
+                    # This is important because _record_to_character converts URLs to local paths
+                    image_url = str(record.get('Image URL', '')) if record.get('Image URL') else None
+                    sprite_url = str(record.get('Sprite URL', '')) if record.get('Sprite URL') else None
+
                     # Row number in sheet (accounting for header)
                     row_num = idx + 2
                     self.worksheet.delete_rows(row_num)
-                    logger.info(f"Character deleted: ID {character_id}")
+                    logger.info(f"Character deleted from sheet: ID {char_id}")
+
+                    # Delete images from Google Drive if URLs are available
+                    if image_url or sprite_url:
+                        logger.info(f"Attempting to delete Drive images for character {char_id}")
+                        logger.debug(f"Image URL from sheet: {image_url}")
+                        logger.debug(f"Sprite URL from sheet: {sprite_url}")
+
+                        images_deleted = 0
+
+                        # Delete original image from Drive
+                        if image_url:
+                            if 'drive.google.com' in image_url:
+                                logger.info(f"Deleting original image from Drive: {image_url}")
+                                if self.delete_from_drive(image_url):
+                                    images_deleted += 1
+                                    logger.info(f"✓ Deleted original image from Drive for character {char_id}")
+                                else:
+                                    logger.warning(f"✗ Failed to delete original image from Drive for character {char_id}")
+                            else:
+                                logger.info(f"Original image is not on Drive (local path): {image_url}")
+                        else:
+                            logger.info(f"No original image URL for character {char_id}")
+
+                        # Delete sprite image from Drive
+                        if sprite_url:
+                            if 'drive.google.com' in sprite_url:
+                                logger.info(f"Deleting sprite image from Drive: {sprite_url}")
+                                if self.delete_from_drive(sprite_url):
+                                    images_deleted += 1
+                                    logger.info(f"✓ Deleted sprite image from Drive for character {char_id}")
+                                else:
+                                    logger.warning(f"✗ Failed to delete sprite image from Drive for character {char_id}")
+                            else:
+                                logger.info(f"Sprite image is not on Drive (local path): {sprite_url}")
+                        else:
+                            logger.info(f"No sprite URL for character {char_id}")
+
+                        if images_deleted > 0:
+                            logger.info(f"Total: Deleted {images_deleted} image(s) from Google Drive for character {char_id}")
+                        else:
+                            logger.info(f"No Drive images were deleted for character {char_id}")
+
+                    # Delete local cached images
+                    local_images_deleted = 0
+
+                    # Delete cached original image
+                    cached_original = Settings.CHARACTERS_DIR / f"char_{char_id}_original.png"
+                    if cached_original.exists():
+                        try:
+                            cached_original.unlink()
+                            local_images_deleted += 1
+                            logger.info(f"✓ Deleted cached original image: {cached_original}")
+                        except Exception as e:
+                            logger.warning(f"✗ Failed to delete cached original image: {e}")
+
+                    # Also check for .jpg extension
+                    cached_original_jpg = Settings.CHARACTERS_DIR / f"char_{char_id}_original.jpg"
+                    if cached_original_jpg.exists():
+                        try:
+                            cached_original_jpg.unlink()
+                            local_images_deleted += 1
+                            logger.info(f"✓ Deleted cached original image: {cached_original_jpg}")
+                        except Exception as e:
+                            logger.warning(f"✗ Failed to delete cached original image: {e}")
+
+                    # Delete cached sprite image
+                    cached_sprite = Settings.SPRITES_DIR / f"char_{char_id}_sprite.png"
+                    if cached_sprite.exists():
+                        try:
+                            cached_sprite.unlink()
+                            local_images_deleted += 1
+                            logger.info(f"✓ Deleted cached sprite image: {cached_sprite}")
+                        except Exception as e:
+                            logger.warning(f"✗ Failed to delete cached sprite image: {e}")
+
+                    if local_images_deleted > 0:
+                        logger.info(f"Total: Deleted {local_images_deleted} cached image(s) from local storage")
+                    else:
+                        logger.debug(f"No cached images found for character {char_id}")
+
                     return True
 
-            logger.warning(f"Character not found for deletion: ID {character_id}")
+            logger.warning(f"Character not found for deletion: ID {char_id}")
             return False
 
         except Exception as e:
@@ -618,6 +915,123 @@ class SheetsManager:
         except Exception as e:
             logger.error(f"Error converting record to character: {e}")
             return None
+
+    def _generate_stats_for_character(self, record: Dict[str, Any], progress_callback=None, current=1, total=1) -> Optional[Character]:
+        """Generate stats for a character with empty stats using AI
+
+        Args:
+            record: Character record from spreadsheet
+            progress_callback: Optional callback function(current, total, char_name, step)
+            current: Current character number being processed
+            total: Total number of characters to process
+        """
+        try:
+            char_id = record.get('ID')
+            image_url = str(record.get('Image URL', '')) if record.get('Image URL') else None
+
+            if not image_url:
+                logger.error(f"No image URL found for character {char_id}")
+                return None
+
+            # Download image from URL to local cache
+            local_path = Settings.CHARACTERS_DIR / f"char_{char_id}_original.png"
+            if not local_path.exists():
+                logger.info(f"Downloading image from {image_url}")
+                if progress_callback:
+                    progress_callback(current, total, None, "画像をダウンロード中...")
+                self.download_from_url(image_url, str(local_path))
+
+            if not local_path.exists():
+                logger.error(f"Failed to download image for character {char_id}")
+                return None
+
+            # Use AI analyzer to generate stats
+            logger.info(f"Generating stats using AI for character {char_id}...")
+            if progress_callback:
+                progress_callback(current, total, None, "AIが画像を分析中...")
+
+            ai_analyzer = AIAnalyzer()
+            char_stats = ai_analyzer.analyze_character(str(local_path))
+
+            if not char_stats:
+                logger.error(f"AI analysis failed for character {char_id}")
+                return None
+
+            # Create a Character object from the CharacterStats
+            from src.models.character import Character
+
+            analyzed_char = Character(
+                id=str(char_id),
+                name=char_stats.name,
+                hp=char_stats.hp,
+                attack=char_stats.attack,
+                defense=char_stats.defense,
+                speed=char_stats.speed,
+                magic=char_stats.magic,
+                description=char_stats.description,
+                image_path=str(local_path),
+                sprite_path=str(local_path)
+            )
+
+            # Update the spreadsheet with generated stats
+            logger.info(f"Updating spreadsheet with generated stats for character {char_id}")
+            if progress_callback:
+                progress_callback(current, total, analyzed_char.name, "スプレッドシートを更新中...")
+
+            self._update_character_stats_in_sheet(char_id, analyzed_char)
+
+            logger.info(f"✓ Successfully generated stats for character '{analyzed_char.name}' (ID: {char_id})")
+            if progress_callback:
+                progress_callback(current, total, analyzed_char.name, "✓ 完了")
+
+            return analyzed_char
+
+        except Exception as e:
+            logger.error(f"Error generating stats for character: {e}")
+            return None
+
+    def _update_character_stats_in_sheet(self, char_id: int, character: Character) -> bool:
+        """Update character stats in spreadsheet using batch update for efficiency"""
+        try:
+            all_records = self.worksheet.get_all_records()
+
+            for idx, record in enumerate(all_records):
+                if record.get('ID') == char_id:
+                    row_num = idx + 2  # +2 because of header row and 0-indexing
+
+                    # Get existing Image URL and Sprite URL (don't overwrite them)
+                    existing_image_url = record.get('Image URL', '')
+                    existing_sprite_url = record.get('Sprite URL', '')
+
+                    # Use update() with range to update multiple cells at once
+                    # Columns: B=Name, C=Image URL, D=Sprite URL, E=HP, F=Attack, G=Defense, H=Speed, I=Magic, J=Description
+                    cell_range = f'B{row_num}:J{row_num}'
+                    values = [[
+                        character.name,           # B: Name
+                        existing_image_url,       # C: Image URL (preserve existing)
+                        existing_sprite_url,      # D: Sprite URL (preserve existing)
+                        character.hp,             # E: HP
+                        character.attack,         # F: Attack
+                        character.defense,        # G: Defense
+                        character.speed,          # H: Speed
+                        character.magic,          # I: Magic
+                        character.description     # J: Description
+                    ]]
+
+                    # Use update() with range for batch update (single API call)
+                    self.worksheet.update(cell_range, values, value_input_option='USER_ENTERED')
+
+                    logger.info(f"✓ Updated stats in spreadsheet for character {char_id} (Name: {character.name})")
+                    return True
+
+            logger.warning(f"Character not found in spreadsheet: ID {char_id}")
+            return False
+
+        except Exception as e:
+            logger.error(f"Error updating character stats in sheet: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return False
 
     def get_character_by_name(self, name: str, silent: bool = False) -> Optional[Character]:
         """
@@ -1060,6 +1474,43 @@ class SheetsManager:
         except Exception as e:
             logger.error(f"Error getting recent battles: {e}")
             return []
+
+    def get_character_battle_count(self, character_id: str) -> int:
+        """
+        Get the number of battles a character has participated in
+
+        Args:
+            character_id: Character ID (string or int)
+
+        Returns:
+            Number of battles the character has participated in
+        """
+        try:
+            if not self.online_mode or not self.battle_history_sheet:
+                logger.debug("Offline mode or battle history not available")
+                return 0
+
+            # Get all battle history records
+            battle_records = self.battle_history_sheet.get_all_records()
+
+            # Convert character_id to string for comparison
+            char_id_str = str(character_id)
+
+            # Count battles where this character participated
+            battle_count = 0
+            for record in battle_records:
+                fighter1_id = str(record.get('Fighter 1 ID', ''))
+                fighter2_id = str(record.get('Fighter 2 ID', ''))
+
+                if fighter1_id == char_id_str or fighter2_id == char_id_str:
+                    battle_count += 1
+
+            logger.debug(f"Character {character_id} has {battle_count} battles")
+            return battle_count
+
+        except Exception as e:
+            logger.error(f"Error getting battle count for character {character_id}: {e}")
+            return 0
 
     def get_statistics(self) -> Dict[str, Any]:
         """

@@ -178,3 +178,4 @@ credentials.json
 server/.env
 data/database.db
 *.db
+data/*

@@ -57,6 +57,7 @@ class Character(BaseModel):
 
 class CharacterStats(BaseModel):
     """Simplified model for AI stat generation"""
+    name: str = Field(min_length=1, max_length=30)
     hp: int = Field(ge=50, le=150)
     attack: int = Field(ge=30, le=120)
     defense: int = Field(ge=20, le=100)

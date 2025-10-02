@@ -1338,20 +1338,21 @@ class BattleEngine:
             button_text_rect = button_text.get_rect(center=button_rect.center)
             self.screen.blit(button_text, button_text_rect)
 
-            # Draw instruction text
-            instruction_text = "クリックまたはスペースキーで閉じる"
+            # Draw instruction text with countdown
             instruction_font = self._create_font(int(20 * scale))
 
-            instruction_surface = instruction_font.render(instruction_text, True, (180, 180, 200))
-            instruction_rect = instruction_surface.get_rect(center=(screen_width // 2, button_y - int(15 * scale_y)))
-            self.screen.blit(instruction_surface, instruction_rect)
-            
             pygame.display.flip()
-            
-            # Wait for user input
+
+            # Wait for user input or auto-close after 3 seconds
             waiting = True
             clock = pygame.time.Clock()
+            auto_close_time = 3.0  # Auto-close after 3 seconds
+            elapsed_time = 0.0
+
             while waiting:
+                dt = clock.tick(30) / 1000.0  # Delta time in seconds
+                elapsed_time += dt
+
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         waiting = False
@@ -1367,8 +1368,35 @@ class BattleEngine:
                         else:
                             # Clicked anywhere else - also close
                             waiting = False
-                            
-                clock.tick(30)  # Limit to 30 FPS while waiting
+
+                # Auto-close after timeout
+                if elapsed_time >= auto_close_time:
+                    waiting = False
+
+                # Update countdown display
+                remaining_time = max(0, auto_close_time - elapsed_time)
+                if remaining_time > 0:
+                    instruction_text = f"クリックまたはスペースキーで閉じる ({remaining_time:.1f}秒後に自動で閉じます)"
+                else:
+                    instruction_text = "閉じています..."
+
+                # Redraw instruction text with countdown
+                instruction_surface = instruction_font.render(instruction_text, True, (180, 180, 200))
+                instruction_rect = instruction_surface.get_rect(center=(screen_width // 2, button_y - int(15 * scale_y)))
+
+                # Clear the instruction area and redraw
+                clear_rect = pygame.Rect(0, button_y - int(30 * scale_y), screen_width, int(30 * scale_y))
+
+                # Redraw the background for this area
+                for y in range(clear_rect.top, clear_rect.bottom):
+                    alpha = int(230 * (y / screen_height))
+                    line_surface = pygame.Surface((screen_width, 1))
+                    line_surface.set_alpha(alpha)
+                    line_surface.fill((20, 20, 40))
+                    self.screen.blit(line_surface, (0, y))
+
+                self.screen.blit(instruction_surface, instruction_rect)
+                pygame.display.flip()
             
         except Exception as e:
             logger.error(f"Error showing battle result: {e}")

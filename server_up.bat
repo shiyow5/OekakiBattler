@@ -4,7 +4,7 @@ REM Windows batch script to start LINE Bot server with ngrok
 echo Starting LINE Bot server...
 
 cd server
-call npm install express @line/bot-sdk axios dotenv
+call npm install express @line/bot-sdk axios dotenv sharp
 
 echo Starting Node.js server...
 start /B node server.js
