@@ -134,10 +134,10 @@ async function handleEvent(event) {
         },
         {
           type: 'template',
-          altText: 'キャラクターのステータスを手動で入力しますか？',
+          altText: 'ステータス入力方法を選択してください',
           template: {
             type: 'buttons',
-            text: '入力方法を選択してください',
+            text: 'キャラクターのステータスを手動で入力しますか？',
             actions: [
               {
                 type: 'message',
