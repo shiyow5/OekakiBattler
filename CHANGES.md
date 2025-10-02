@@ -1,5 +1,58 @@
 # 変更履歴 (CHANGES.md)
 
+## 2025-10-03 (修正53): オリジナル画像の不要なダウンロード・保存を削除
+
+### 変更内容
+オリジナル画像はスプライト生成時のみ必要で、それ以外では不要なため、ダウンロードと保存を最小限にしました。
+
+**変更ファイル:**
+- `src/services/sheets_manager.py` - オリジナル画像のダウンロードを削除、透過処理後に削除
+
+### 主な修正内容
+
+#### 変更点
+1. **`_record_to_character()`**: オリジナル画像のダウンロードを削除
+   - スプライトのみローカルにダウンロード
+   - オリジナル画像はURLのまま保持（ダウンロード不要）
+
+2. **`_generate_stats_for_character()`**: 透過処理後にオリジナル画像を削除
+   - スプライト作成後、オリジナル画像をローカルから削除
+   - Google DriveにはオリジナルとスプライトURLが保存されているため問題なし
+
+#### 修正後の動作
+```python
+# _record_to_character(): スプライトのみダウンロード
+if sprite_url and sprite_url.startswith('http'):
+    local_path = Settings.SPRITES_DIR / f"char_{record.get('ID')}_sprite.png"
+    if not local_path.exists():
+        self.download_from_url(sprite_url, str(local_path))
+    sprite_path = str(local_path)
+else:
+    sprite_path = sprite_url
+
+# オリジナル画像はURLのまま（ダウンロードしない）
+image_path = image_url if image_url else ''
+```
+
+```python
+# _generate_stats_for_character(): 透過処理後に削除
+if success and sprite_output:
+    sprite_path = sprite_output
+    sprite_url = self.upload_to_drive(sprite_path, f"char_{char_id}_sprite.png")
+
+    # オリジナル画像を削除（もう不要）
+    if local_path.exists():
+        local_path.unlink()
+        logger.info(f"✓ Deleted original image after sprite creation")
+```
+
+### メリット
+- ディスク使用量削減（オリジナル画像を保持しない）
+- 不要なダウンロード処理を削減
+- スプライトのみローカルキャッシュで高速表示
+
+---
+
 ## 2025-10-03 (修正52): LINEボット登録時のスプライト透過処理
 
 ### 変更内容

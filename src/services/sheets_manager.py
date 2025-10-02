@@ -874,15 +874,7 @@ class SheetsManager:
             image_url = str(record.get('Image URL', '')) if record.get('Image URL') else None
             sprite_url = str(record.get('Sprite URL', '')) if record.get('Sprite URL') else None
 
-            # Download images from URLs to local cache if they're URLs
-            if image_url and image_url.startswith('http'):
-                local_path = Settings.CHARACTERS_DIR / f"char_{record.get('ID')}_original.png"
-                if not local_path.exists():
-                    self.download_from_url(image_url, str(local_path))
-                image_path = str(local_path) if local_path.exists() else image_url
-            else:
-                image_path = image_url
-
+            # Only download sprite image (original image not needed locally)
             if sprite_url and sprite_url.startswith('http'):
                 local_path = Settings.SPRITES_DIR / f"char_{record.get('ID')}_sprite.png"
                 if not local_path.exists():
@@ -890,6 +882,9 @@ class SheetsManager:
                 sprite_path = str(local_path) if local_path.exists() else sprite_url
             else:
                 sprite_path = sprite_url
+
+            # Use URL directly for original image (no local download needed)
+            image_path = image_url if image_url else ''
 
             # Convert wins/losses/draws from spreadsheet to battle_count/win_count
             wins = int(record.get('Wins', 0))
@@ -977,6 +972,14 @@ class SheetsManager:
                 else:
                     logger.warning(f"Failed to upload sprite to Drive, using local path")
                     sprite_url = sprite_path
+
+                # Delete original image after sprite creation (no longer needed locally)
+                try:
+                    if local_path.exists():
+                        local_path.unlink()
+                        logger.info(f"✓ Deleted original image after sprite creation: {local_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete original image: {e}")
             else:
                 logger.warning(f"Failed to create sprite: {message}, using original image")
                 sprite_path = str(local_path)
