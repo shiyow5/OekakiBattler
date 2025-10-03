@@ -212,6 +212,12 @@ class AudioManager:
                 "frequency": 1200,
                 "duration": 0.15
             },
+            "guard_break": {
+                "files": ["guard_break.wav", "guard_break.ogg", "guard_break.mp3"],
+                "frequency": 1000,
+                "duration": 0.2,
+                "sharp": True
+            },
             "magic": {
                 "files": ["magic.wav", "magic.ogg", "magic.mp3"],
                 "frequency": 600,
@@ -251,7 +257,8 @@ class AudioManager:
                         duration=config["duration"],
                         warble=config.get("warble", False),
                         descending=config.get("descending", False),
-                        melody=config.get("melody", False)
+                        melody=config.get("melody", False),
+                        sharp=config.get("sharp", False)
                     )
 
             logger.info("Sound effects initialized")
@@ -259,16 +266,16 @@ class AudioManager:
         except Exception as e:
             logger.warning(f"Failed to create default sounds: {e}")
     
-    def _create_simple_sound(self, name: str, frequency: int, duration: float, 
-                           warble: bool = False, descending: bool = False, melody: bool = False):
+    def _create_simple_sound(self, name: str, frequency: int, duration: float,
+                           warble: bool = False, descending: bool = False, melody: bool = False, sharp: bool = False):
         """Create a simple programmatic sound effect"""
         try:
             sample_rate = 22050
             samples = int(sample_rate * duration)
-            
+
             # Create sound data
             import numpy as np
-            
+
             if melody:
                 # Create a simple ascending melody
                 freqs = [frequency, frequency * 1.25, frequency * 1.5, frequency * 2.0]
@@ -289,6 +296,16 @@ class AudioManager:
                 freq_sweep = frequency * (1 - t / duration * 0.5)
                 wave = np.sin(freq_sweep * 2 * np.pi * t) * 0.3
                 sound_data = wave
+            elif sharp:
+                # Create sharp impact sound (guard break)
+                t = np.linspace(0, duration, samples, False)
+                # Mix of high frequency and noise
+                wave1 = np.sin(frequency * 2 * np.pi * t) * 0.25
+                wave2 = np.sin(frequency * 1.5 * 2 * np.pi * t) * 0.15
+                noise = np.random.uniform(-0.1, 0.1, samples)
+                # Apply quick decay envelope
+                envelope = np.exp(-t * 10)
+                sound_data = (wave1 + wave2 + noise) * envelope
             else:
                 # Simple tone
                 t = np.linspace(0, duration, samples, False)

@@ -80,16 +80,18 @@ class BattleEngine:
             if self.clock is None:
                 self.clock = pygame.time.Clock()
             
-            # Load fonts with Japanese support
+            # Load fonts with Japanese and emoji support
             if self.font is None:
                 try:
-                    # Try to load a Japanese font
+                    # Try to load a Japanese font with emoji support
                     japanese_fonts = [
+                        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",  # Linux Noto (best for CJK + emoji fallback)
+                        "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",  # Linux alternative path
+                        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux alternative path
+                        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",  # macOS
+                        "C:/Windows/Fonts/msgothic.ttc",  # Windows
                         "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",  # Linux system font
                         "/usr/share/fonts/truetype/fonts-japanese-mincho.ttf",  # Linux system font
-                        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",  # macOS
-                        "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",  # Linux
-                        "C:/Windows/Fonts/msgothic.ttc",  # Windows
                         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Linux fallback
                     ]
 
@@ -122,13 +124,15 @@ class BattleEngine:
                     if self.japanese_font_path:
                         self.small_font = pygame.font.Font(self.japanese_font_path, 18)
                     else:
-                        # Try to load a Japanese font
+                        # Try to load a Japanese font with emoji support
                         japanese_fonts = [
+                            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                            "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",
+                            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+                            "C:/Windows/Fonts/msgothic.ttc",
                             "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
                             "/usr/share/fonts/truetype/fonts-japanese-mincho.ttf",
-                            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-                            "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",
-                            "C:/Windows/Fonts/msgothic.ttc",
                             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
                         ]
 
@@ -197,26 +201,39 @@ class BattleEngine:
             
             # Battle loop
             start_time = time.time()
-            turn_number = 1
-            
-            while turn_number <= self.max_turns:
+            action_count = 0  # Count individual actions (not rounds)
+            max_actions = self.max_turns * 2  # Each turn has 2 actions (one per character)
+
+            while action_count < max_actions:
                 # Check if battle should end
                 if char1_current_hp <= 0 or char2_current_hp <= 0:
                     break
-                
+
                 # Determine turn order
                 turn_order = self.determine_turn_order(char1, char2)
-                
+
                 for attacker, defender in turn_order:
+                    # Check action limit before each action
+                    if action_count >= max_actions:
+                        logger.info(f"Reached max actions limit: {max_actions}")
+                        break
+
+                    # Check if battle should end
+                    if char1_current_hp <= 0 or char2_current_hp <= 0:
+                        break
+
                     if attacker.id == char1.id:
                         attacker_hp, defender_hp = char1_current_hp, char2_current_hp
                     else:
                         attacker_hp, defender_hp = char2_current_hp, char1_current_hp
-                    
+
                     # Skip turn if attacker is defeated
                     if attacker_hp <= 0:
                         continue
-                    
+
+                    # Calculate current turn number (1-indexed, based on actions)
+                    turn_number = (action_count // 2) + 1
+
                     # Execute turn
                     turn = self.execute_turn(attacker, defender, turn_number, attacker_hp, defender_hp)
                     battle.add_turn(turn)
@@ -240,13 +257,21 @@ class BattleEngine:
                     if visual_mode and self.screen:
                         self._update_battle_display(char1, char2, char1_current_hp, char2_current_hp, turn, battle.battle_log[-5:])
                         time.sleep(0.5 * self.battle_speed)
-                    
-                    # Check if battle should end
+
+                    # Increment action count
+                    action_count += 1
+
+                    # Check if battle should end after action
                     if char1_current_hp <= 0 or char2_current_hp <= 0:
                         break
-                
-                turn_number += 1
             
+            # Log battle end reason
+            if char1_current_hp <= 0 or char2_current_hp <= 0:
+                logger.info(f"Battle ended by KO (actions: {action_count}/{max_actions})")
+            elif action_count >= max_actions:
+                logger.info(f"Battle ended by time limit (max turns: {self.max_turns}, max actions: {max_actions})")
+                battle.add_log_entry(f"⏰ {self.max_turns}ターン経過！時間切れです！")
+
             # Calculate battle statistics
             battle.char1_final_hp = char1_current_hp
             battle.char2_final_hp = char2_current_hp
@@ -261,7 +286,7 @@ class BattleEngine:
             # Determine winner and result type
             if char1_current_hp <= 0 or char2_current_hp <= 0:
                 battle.result_type = "KO"
-            elif turn_number > self.max_turns:
+            elif action_count >= max_actions:
                 battle.result_type = "Time Limit"
             else:
                 battle.result_type = "Draw"
@@ -319,22 +344,27 @@ class BattleEngine:
                 error_battle.add_log_entry(f"Battle failed: {e}")
                 return error_battle
     
-    def calculate_damage(self, attacker: Character, defender: Character, action_type: str = "attack") -> Tuple[int, bool, bool]:
-        """Calculate damage, critical hit, and miss status"""
+    def calculate_damage(self, attacker: Character, defender: Character, action_type: str = "attack") -> Tuple[int, bool, bool, bool]:
+        """Calculate damage, critical hit, miss status, and guard break"""
         try:
             is_critical = False
             is_miss = False
+            is_guard_break = False
             base_damage = 0
-            
-            # Calculate hit chance based on speed difference
+
+            # Calculate hit chance based on speed difference and defender's luck
             speed_diff = attacker.speed - defender.speed
-            hit_chance = max(0.8, min(0.95, 0.85 + speed_diff * 0.001))
-            
+            base_hit_chance = max(0.8, min(0.95, 0.85 + speed_diff * 0.001))
+
+            # Defender's luck reduces hit chance (max -30%)
+            luck_modifier = (defender.luck / 100) * 0.3
+            hit_chance = max(0.55, base_hit_chance - luck_modifier)
+
             # Check for miss
             if random.random() > hit_chance:
                 is_miss = True
-                return 0, is_critical, is_miss
-            
+                return 0, is_critical, is_miss, is_guard_break
+
             # Calculate base damage
             if action_type == "magic":
                 base_damage = attacker.magic + random.randint(-10, 10)
@@ -342,25 +372,40 @@ class BattleEngine:
                 effective_defense = int(max(0, defender.defense * 0.5))
             else:  # Physical attack
                 base_damage = attacker.attack + random.randint(-15, 15)
-                effective_defense = defender.defense
+
+                # Check for guard break (physical attacks only)
+                # Base 15% + attacker's luck (max +15%)
+                base_guard_break_chance = 0.15
+                luck_guard_break_bonus = (attacker.luck / 100) * 0.15
+                guard_break_chance = min(0.30, base_guard_break_chance + luck_guard_break_bonus)
+
+                if random.random() < guard_break_chance:
+                    is_guard_break = True
+                    effective_defense = 0  # Ignore all defense
+                else:
+                    effective_defense = defender.defense
 
             # Apply defense
             damage = int(max(1, base_damage - effective_defense + random.randint(-5, 5)))
 
-            # Check for critical hit
-            critical_chance = self.critical_chance
+            # Check for critical hit - attacker's luck increases critical chance (max +30%)
+            base_critical_chance = self.critical_chance
             if action_type == "magic":
-                critical_chance *= 0.7  # Magic has lower critical chance
+                base_critical_chance *= 0.7  # Magic has lower critical chance
+
+            # Attacker's luck increases critical chance
+            luck_crit_bonus = (attacker.luck / 100) * 0.3
+            critical_chance = min(0.35, base_critical_chance + luck_crit_bonus)
 
             if random.random() < critical_chance:
                 is_critical = True
                 damage = int(damage * self.critical_multiplier)
 
-            return damage, is_critical, is_miss
-            
+            return damage, is_critical, is_miss, is_guard_break
+
         except Exception as e:
             logger.error(f"Error calculating damage: {e}")
-            return 10, False, False  # Fallback damage
+            return 10, False, False, False  # Fallback damage
     
     def determine_turn_order(self, char1: Character, char2: Character) -> List[Tuple[Character, Character]]:
         """Determine who goes first based on speed"""
@@ -383,13 +428,13 @@ class BattleEngine:
         try:
             # Determine action type based on character stats and situation
             action_type = self._choose_action(attacker, defender, defender_hp)
-            
-            # Calculate damage
-            damage, is_critical, is_miss = self.calculate_damage(attacker, defender, action_type)
-            
+
+            # Calculate damage (now returns 4 values including guard break)
+            damage, is_critical, is_miss, is_guard_break = self.calculate_damage(attacker, defender, action_type)
+
             # Apply damage
             defender_hp_after = max(0, defender_hp - damage)
-            
+
             # Create turn record
             turn = BattleTurn(
                 turn_number=turn_number,
@@ -399,12 +444,13 @@ class BattleEngine:
                 damage=damage,
                 is_critical=is_critical,
                 is_miss=is_miss,
+                is_guard_break=is_guard_break,
                 attacker_hp_after=attacker_hp,
                 defender_hp_after=defender_hp_after
             )
-            
+
             return turn
-            
+
         except Exception as e:
             logger.error(f"Error executing turn: {e}")
             # Return safe default turn
@@ -416,6 +462,7 @@ class BattleEngine:
                 damage=0,
                 is_critical=False,
                 is_miss=True,
+                is_guard_break=False,
                 attacker_hp_after=attacker_hp,
                 defender_hp_after=defender_hp
             )
@@ -449,18 +496,27 @@ class BattleEngine:
         try:
             if turn.is_miss:
                 return f"💨 {attacker.name}の攻撃は外れた！"
-            
+
+            # Guard break message (can occur with critical)
+            guard_break_msg = ""
+            if turn.is_guard_break:
+                guard_break_msg = "🛡️💥ガードブレイク！"
+
             if turn.action_type == "magic":
                 if turn.is_critical:
                     return f"✨💥 {attacker.name}のクリティカル魔法攻撃！{defender.name}に{turn.damage}ダメージ！"
                 else:
                     return f"🔮 {attacker.name}の魔法攻撃！{defender.name}に{turn.damage}ダメージ"
             else:
-                if turn.is_critical:
+                if turn.is_critical and turn.is_guard_break:
+                    return f"⚔️💥 {attacker.name}のクリティカル攻撃！{guard_break_msg}{defender.name}に{turn.damage}ダメージ！"
+                elif turn.is_critical:
                     return f"⚔️💥 {attacker.name}のクリティカル攻撃！{defender.name}に{turn.damage}ダメージ！"
+                elif turn.is_guard_break:
+                    return f"⚔️ {attacker.name}の攻撃！{guard_break_msg}{defender.name}に{turn.damage}ダメージ！"
                 else:
                     return f"⚔️ {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ"
-                
+
         except Exception as e:
             logger.error(f"Error creating turn log: {e}")
             return f"{attacker.name} attacks {defender.name}"
@@ -498,11 +554,20 @@ class BattleEngine:
                 defender_hp_before = char1_hp
                 defender_hp_after = turn.defender_hp_after
 
-            # Calculate frame counts based on battle_speed
-            # battle_speed: 0.01 (fastest) to 3.0 (slowest), default 0.5
+            # Calculate frame rate based on battle_speed
+            # battle_speed: 0.0 (fastest) to 1.0 (slowest), default 0.5
+            # Lower battle_speed = fewer frames = faster animation
             # Higher battle_speed = more frames = slower animation
-            speed_multiplier = self.battle_speed * 2  # Convert to reasonable multiplier (0.02 to 6.0)
+            base_fps = 60
+            fps = base_fps  # Keep FPS constant at 60
 
+            logger.debug(f"Battle speed: {self.battle_speed}, FPS: {fps}")
+
+            # Calculate frame counts based on battle_speed
+            # battle_speed 0.0 = instant (1 frame)
+            # battle_speed 0.5 = default speed
+            # battle_speed 1.0 = slowest (double frames)
+            speed_multiplier = max(0.02, self.battle_speed / 0.5)  # Normalize to default (0.5), minimum 0.02 for very fast
             bounce_frames = int(50 * speed_multiplier)
             charge_frames = int(30 * speed_multiplier)
             windup_frames = int(15 * speed_multiplier)
@@ -563,12 +628,20 @@ class BattleEngine:
                     else:
                         audio_manager.play_sound("attack")
 
+                    # Guard break sound effect
+                    if turn.is_guard_break:
+                        audio_manager.play_sound("guard_break")
+
                     # Now create impact effects and show damage
                     self.effects.create_slash_trail(attacker_pos, defender_pos)
                     self.effects.create_impact_particles(
                         defender_pos[0], defender_pos[1],
                         direction, 25
                     )
+
+                    # Guard break visual effect (blue shattered shield)
+                    if turn.is_guard_break:
+                        self.effects.create_explosion(defender_pos[0], defender_pos[1], 45, (100, 150, 255))  # Blue explosion for shield break
 
                     if turn.is_critical:
                         self.effects.screen_shake(18, 12)

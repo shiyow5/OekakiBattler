@@ -28,24 +28,51 @@ class ImageProcessor:
             if not path.exists():
                 logger.error(f"Image file not found: {image_path}")
                 return None
-                
+
+            # Check file size
+            file_size = path.stat().st_size
+            if file_size == 0:
+                logger.error(f"Image file is empty: {image_path}")
+                return None
+            if file_size > 50 * 1024 * 1024:  # 50MB limit
+                logger.error(f"Image file too large ({file_size} bytes): {image_path}")
+                return None
+
             if path.suffix.lower() not in self.supported_formats:
                 logger.error(f"Unsupported format: {path.suffix}")
                 return None
-            
+
             # Load with OpenCV
-            image = cv2.imread(str(path))
+            image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
             if image is None:
-                logger.error(f"Failed to load image: {image_path}")
-                return None
-            
-            # Convert BGR to RGB
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                logger.error(f"Failed to load image with OpenCV: {image_path}")
+                # Try with PIL as fallback
+                try:
+                    from PIL import Image
+                    pil_image = Image.open(path)
+                    image = np.array(pil_image)
+                    if len(image.shape) == 2:  # Grayscale
+                        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+                    elif image.shape[2] == 4:  # RGBA
+                        image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+                    logger.info(f"Loaded image with PIL fallback: {image.shape}")
+                except Exception as pil_error:
+                    logger.error(f"PIL fallback also failed: {pil_error}")
+                    return None
+            else:
+                # Convert BGR to RGB if needed
+                if len(image.shape) == 3 and image.shape[2] == 3:
+                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                elif len(image.shape) == 3 and image.shape[2] == 4:
+                    image = cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
+
             logger.info(f"Successfully loaded image: {image.shape}")
             return image
-            
+
         except Exception as e:
             logger.error(f"Error loading image: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def extract_character(self, image: np.ndarray) -> Optional[np.ndarray]:

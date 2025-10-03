@@ -87,13 +87,15 @@ class StoryBossManagerWindow:
         self.defense_var = tk.IntVar(value=50)
         self.speed_var = tk.IntVar(value=50)
         self.magic_var = tk.IntVar(value=50)
+        self.luck_var = tk.IntVar(value=50)
 
         stats = [
-            ("HP (50-300):", self.hp_var, 50, 300),
-            ("攻撃力 (30-200):", self.attack_var, 30, 200),
-            ("防御力 (20-150):", self.defense_var, 20, 150),
-            ("速さ (40-180):", self.speed_var, 40, 180),
-            ("魔力 (10-150):", self.magic_var, 10, 150)
+            ("HP (10-300):", self.hp_var, 10, 300),
+            ("攻撃力 (10-200):", self.attack_var, 10, 200),
+            ("防御力 (10-150):", self.defense_var, 10, 150),
+            ("速さ (10-150):", self.speed_var, 10, 150),
+            ("魔力 (10-150):", self.magic_var, 10, 150),
+            ("運 (0-100):", self.luck_var, 0, 100)
         ]
 
         for label_text, var, min_val, max_val in stats:
@@ -103,6 +105,16 @@ class StoryBossManagerWindow:
             scale = ttk.Scale(frame, from_=min_val, to=max_val, variable=var, orient=tk.HORIZONTAL)
             scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
             ttk.Label(frame, textvariable=var, width=5).pack(side=tk.LEFT)
+
+        # Total stats label
+        total_frame = ttk.Frame(stats_frame)
+        total_frame.pack(fill=tk.X, pady=(10, 0))
+        self.total_stats_label = ttk.Label(total_frame, text="Total: 350/500", foreground="blue", font=("", 10, "bold"))
+        self.total_stats_label.pack(side=tk.LEFT)
+
+        # Bind stat changes to update total
+        for var in [self.hp_var, self.attack_var, self.defense_var, self.speed_var, self.magic_var, self.luck_var]:
+            var.trace('w', self._update_total_stats)
 
         # Description
         desc_frame = ttk.Frame(info_frame)
@@ -138,6 +150,23 @@ class StoryBossManagerWindow:
         ttk.Button(button_frame, text="削除", command=self._delete_boss).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="閉じる", command=self.window.destroy).pack(side=tk.RIGHT, padx=5)
 
+    def _update_total_stats(self, *args):
+        """Update total stats display"""
+        try:
+            total = (self.hp_var.get() + self.attack_var.get() + self.defense_var.get() +
+                    self.speed_var.get() + self.magic_var.get() + self.luck_var.get())
+
+            # Update label color based on total (500 max for bosses)
+            if total > 500:
+                self.total_stats_label.config(text=f"Total: {total}/500", foreground="red")
+            elif total == 500:
+                self.total_stats_label.config(text=f"Total: {total}/500", foreground="green")
+            else:
+                self.total_stats_label.config(text=f"Total: {total}/500", foreground="blue")
+        except:
+            # If any value is invalid, don't update
+            pass
+
     def _load_bosses(self):
         """Load all bosses"""
         try:
@@ -165,6 +194,7 @@ class StoryBossManagerWindow:
                 self.defense_var.set(self.current_boss.defense)
                 self.speed_var.set(self.current_boss.speed)
                 self.magic_var.set(self.current_boss.magic)
+                self.luck_var.set(self.current_boss.luck)
                 self.desc_text.delete("1.0", tk.END)
                 self.desc_text.insert("1.0", self.current_boss.description)
 
@@ -182,6 +212,7 @@ class StoryBossManagerWindow:
                 self.defense_var.set(50 + (level - 1) * 20)
                 self.speed_var.set(50 + (level - 1) * 25)
                 self.magic_var.set(50 + (level - 1) * 20)
+                self.luck_var.set(50)
                 self.desc_text.delete("1.0", tk.END)
                 self.selected_image_path = None
                 self.selected_sprite_path = None
@@ -195,6 +226,7 @@ class StoryBossManagerWindow:
                     defense=self.defense_var.get(),
                     speed=self.speed_var.get(),
                     magic=self.magic_var.get(),
+                    luck=self.luck_var.get(),
                     description=""
                 )
 
@@ -280,6 +312,13 @@ class StoryBossManagerWindow:
 
             description = self.desc_text.get("1.0", tk.END).strip()
 
+            # Check total stats limit (500 for bosses)
+            total_stats = (self.hp_var.get() + self.attack_var.get() + self.defense_var.get() +
+                          self.speed_var.get() + self.magic_var.get() + self.luck_var.get())
+            if total_stats > 500:
+                messagebox.showwarning("警告", f"ステータス合計 ({total_stats}) が上限 (500) を超えています")
+                return
+
             # Update boss data
             self.current_boss.name = name
             self.current_boss.hp = self.hp_var.get()
@@ -287,6 +326,7 @@ class StoryBossManagerWindow:
             self.current_boss.defense = self.defense_var.get()
             self.current_boss.speed = self.speed_var.get()
             self.current_boss.magic = self.magic_var.get()
+            self.current_boss.luck = self.luck_var.get()
             self.current_boss.description = description
 
             # Upload images if they are local files
@@ -348,6 +388,7 @@ class StoryBossManagerWindow:
                     defense=50,
                     speed=50,
                     magic=50,
+                    luck=50,
                     description=""
                 )
                 if self.db_manager.save_story_boss(default_boss):

@@ -118,12 +118,12 @@ class SheetsManager:
             headers = self.worksheet.row_values(1)
             expected_headers = [
                 'ID', 'Name', 'Image URL', 'Sprite URL', 'HP', 'Attack',
-                'Defense', 'Speed', 'Magic', 'Description', 'Created At',
+                'Defense', 'Speed', 'Magic', 'Luck', 'Description', 'Created At',
                 'Wins', 'Losses', 'Draws'
             ]
 
             if not headers or headers != expected_headers:
-                self.worksheet.update('A1:N1', [expected_headers])
+                self.worksheet.update('A1:O1', [expected_headers])
                 logger.info("Headers initialized in spreadsheet")
 
         except Exception as e:
@@ -502,6 +502,7 @@ class SheetsManager:
                 character.defense,
                 character.speed,
                 character.magic,
+                character.luck,
                 character.description or '',
                 datetime.now().isoformat(),
                 character.win_count,
@@ -556,14 +557,18 @@ class SheetsManager:
 
         Args:
             progress_callback: Optional callback function(current, total, char_name, step)
-                               to report progress during AI generation
+                               to report progress during AI generation and sprite processing
         """
         try:
+            # Fix ID integrity before processing
+            self._fix_id_integrity()
+
             all_records = self.worksheet.get_all_records()
             characters = []
 
-            # First pass: identify characters needing generation
+            # First pass: identify characters needing generation or sprite processing
             records_needing_generation = []
+            records_needing_sprite = []
             for record in all_records:
                 needs_generation = (
                     record.get('HP') == 0 or
@@ -574,12 +579,21 @@ class SheetsManager:
                 if needs_generation:
                     records_needing_generation.append(record)
 
-            # Log total characters needing generation
+                # Check if sprite needs processing (sprite_url == image_url)
+                image_url = str(record.get('Image URL', '')) if record.get('Image URL') else None
+                sprite_url = str(record.get('Sprite URL', '')) if record.get('Sprite URL') else None
+                if sprite_url == image_url and sprite_url and image_url:
+                    records_needing_sprite.append(record)
+
+            # Log total characters needing processing
             if records_needing_generation:
                 logger.info(f"Found {len(records_needing_generation)} character(s) with empty stats")
+            if records_needing_sprite:
+                logger.info(f"Found {len(records_needing_sprite)} character(s) needing sprite processing")
 
             # Second pass: process all records
             generation_count = 0
+            sprite_count = 0
             for record in all_records:
                 needs_generation = (
                     record.get('HP') == 0 or
@@ -602,7 +616,22 @@ class SheetsManager:
                     if generated_char:
                         characters.append(generated_char)
                 else:
-                    char = self._record_to_character(record)
+                    # Check if sprite needs processing
+                    image_url = str(record.get('Image URL', '')) if record.get('Image URL') else None
+                    sprite_url = str(record.get('Sprite URL', '')) if record.get('Sprite URL') else None
+                    needs_sprite = (sprite_url == image_url and sprite_url and image_url)
+
+                    if needs_sprite:
+                        sprite_count += 1
+                        if progress_callback:
+                            progress_callback(
+                                sprite_count,
+                                len(records_needing_sprite),
+                                record.get('Name', f"ID {record.get('ID')}"),
+                                "スプライト処理中"
+                            )
+
+                    char = self._record_to_character(record, progress_callback=progress_callback if needs_sprite else None)
                     if char:
                         characters.append(char)
 
@@ -657,6 +686,7 @@ class SheetsManager:
                         character.defense,
                         character.speed,
                         character.magic,
+                        character.luck,
                         character.description or '',
                         record.get('Created At', ''),  # Keep original creation time
                         character.win_count,
@@ -665,7 +695,7 @@ class SheetsManager:
                     ]
 
                     # Update the row
-                    self.worksheet.update(f'A{row_num}:N{row_num}', [row])
+                    self.worksheet.update(f'A{row_num}:O{row_num}', [row])
                     logger.info(f"✓ Character updated: {character.name} (ID: {character.id}) - Image URLs preserved")
                     return True
 
@@ -868,20 +898,100 @@ class SheetsManager:
             logger.error(f"Error updating battle stats: {e}")
             return False
 
-    def _record_to_character(self, record: Dict[str, Any]) -> Optional[Character]:
-        """Convert spreadsheet record to Character object with URL support"""
+    def _record_to_character(self, record: Dict[str, Any], progress_callback=None) -> Optional[Character]:
+        """Convert spreadsheet record to Character object with URL support
+
+        Args:
+            record: Character record from spreadsheet
+            progress_callback: Optional callback for sprite processing progress
+        """
         try:
             image_url = str(record.get('Image URL', '')) if record.get('Image URL') else None
             sprite_url = str(record.get('Sprite URL', '')) if record.get('Sprite URL') else None
 
-            # Only download sprite image (original image not needed locally)
-            if sprite_url and sprite_url.startswith('http'):
-                local_path = Settings.SPRITES_DIR / f"char_{record.get('ID')}_sprite.png"
-                if not local_path.exists():
-                    self.download_from_url(sprite_url, str(local_path))
-                sprite_path = str(local_path) if local_path.exists() else sprite_url
+            # Handle sprite image
+            local_sprite_path = Settings.SPRITES_DIR / f"char_{record.get('ID')}_sprite.png"
+
+            # Check if sprite_url is same as image_url (manual registration from LINE/GAS)
+            # In this case, sprite has not been processed yet
+            sprite_needs_processing = (sprite_url == image_url and sprite_url and image_url)
+
+            if sprite_needs_processing:
+                logger.info(f"Character {record.get('ID')}: Sprite URL equals Image URL, needs processing")
+
+            if sprite_url and sprite_url.startswith('http') and not sprite_needs_processing:
+                # Sprite URL exists and is different from image URL - download it
+                if not local_sprite_path.exists():
+                    logger.info(f"Character {record.get('ID')}: Downloading sprite from {sprite_url}")
+                    self.download_from_url(sprite_url, str(local_sprite_path))
+                sprite_path = str(local_sprite_path) if local_sprite_path.exists() else sprite_url
+            elif (sprite_needs_processing or not local_sprite_path.exists()) and image_url and image_url.startswith('http'):
+                # Need to create sprite from original image
+                logger.info(f"Character {record.get('ID')}: Creating sprite from image URL")
+                temp_image_path = Settings.CHARACTERS_DIR / f"char_{record.get('ID')}_temp.png"
+
+                try:
+                    # Download original image temporarily
+                    if self.download_from_url(image_url, str(temp_image_path)):
+                        # Validate downloaded file
+                        if not temp_image_path.exists() or temp_image_path.stat().st_size == 0:
+                            logger.warning(f"Downloaded file is empty or doesn't exist for character {record.get('ID')}")
+                            sprite_path = sprite_url if sprite_url else ''
+                        else:
+                            # Process image to create sprite with transparency
+                            from src.services.image_processor import ImageProcessor
+                            processor = ImageProcessor()
+
+                            try:
+                                success, message, sprite_output = processor.process_character_image(
+                                    str(temp_image_path),
+                                    str(Settings.SPRITES_DIR),
+                                    f"char_{record.get('ID')}"
+                                )
+
+                                if success and sprite_output:
+                                    sprite_path = sprite_output
+                                    logger.info(f"✓ Created sprite from image URL for character {record.get('ID')}")
+
+                                    # Upload sprite to Google Drive and update sheet
+                                    try:
+                                        uploaded_sprite_url = self.upload_to_drive(
+                                            sprite_output,
+                                            f"char_{record.get('ID')}_sprite.png"
+                                        )
+                                        if uploaded_sprite_url:
+                                            # Update Sprite URL in sheet
+                                            char_id = int(record.get('ID'))
+                                            all_records_for_update = self.worksheet.get_all_records()
+                                            for idx, rec in enumerate(all_records_for_update):
+                                                if rec.get('ID') == char_id:
+                                                    row_num = idx + 2  # +2 for header and 0-indexing
+                                                    self.worksheet.update_cell(row_num, 4, uploaded_sprite_url)  # Column 4 is Sprite URL
+                                                    logger.info(f"✓ Updated Sprite URL in sheet for character {char_id}")
+                                                    break
+                                    except Exception as upload_error:
+                                        logger.warning(f"Failed to upload sprite to Drive: {upload_error}")
+                                else:
+                                    logger.warning(f"Failed to create sprite: {message}")
+                                    sprite_path = sprite_url if sprite_url else ''
+                            except Exception as process_error:
+                                logger.error(f"Image processing error for character {record.get('ID')}: {process_error}")
+                                sprite_path = sprite_url if sprite_url else ''
+                    else:
+                        logger.warning(f"Failed to download image for character {record.get('ID')}")
+                        sprite_path = sprite_url if sprite_url else ''
+                except Exception as e:
+                    logger.error(f"Sprite processing failed for character {record.get('ID')}: {e}")
+                    sprite_path = sprite_url if sprite_url else ''
+                finally:
+                    # Clean up temporary file
+                    if temp_image_path.exists():
+                        try:
+                            temp_image_path.unlink()
+                        except Exception as cleanup_error:
+                            logger.warning(f"Failed to cleanup temp file: {cleanup_error}")
             else:
-                sprite_path = sprite_url
+                sprite_path = sprite_url if sprite_url else str(local_sprite_path) if local_sprite_path.exists() else ''
 
             # Use URL directly for original image (no local download needed)
             image_path = image_url if image_url else ''
@@ -903,6 +1013,7 @@ class SheetsManager:
                 defense=int(record.get('Defense', 50)),
                 speed=int(record.get('Speed', 50)),
                 magic=int(record.get('Magic', 50)),
+                luck=int(record.get('Luck', 50)),
                 description=str(record.get('Description', '')) if record.get('Description') else '',
                 battle_count=battle_count,
                 win_count=win_count
@@ -1053,8 +1164,8 @@ class SheetsManager:
                     final_sprite_url = sprite_url if sprite_url else existing_sprite_url
 
                     # Use update() with range to update multiple cells at once
-                    # Columns: B=Name, C=Image URL, D=Sprite URL, E=HP, F=Attack, G=Defense, H=Speed, I=Magic, J=Description
-                    cell_range = f'B{row_num}:J{row_num}'
+                    # Columns: B=Name, C=Image URL, D=Sprite URL, E=HP, F=Attack, G=Defense, H=Speed, I=Magic, J=Luck, K=Description
+                    cell_range = f'B{row_num}:K{row_num}'
                     values = [[
                         character.name,           # B: Name
                         existing_image_url,       # C: Image URL (preserve existing)
@@ -1064,7 +1175,8 @@ class SheetsManager:
                         character.defense,        # G: Defense
                         character.speed,          # H: Speed
                         character.magic,          # I: Magic
-                        character.description     # J: Description
+                        character.luck,           # J: Luck
+                        character.description     # K: Description
                     ]]
 
                     # Use update() with range for batch update (single API call)
@@ -1668,6 +1780,7 @@ class SheetsManager:
                         defense=int(record.get('Defense', 50)),
                         speed=int(record.get('Speed', 50)),
                         magic=int(record.get('Magic', 50)),
+                        luck=int(record.get('Luck', 50)),
                         description=record.get('Description', ''),
                         image_path=image_url,
                         sprite_path=sprite_path
@@ -1707,9 +1820,10 @@ class SheetsManager:
                         boss.defense,
                         boss.speed,
                         boss.magic,
+                        boss.luck,
                         boss.description
                     ]]
-                    self.story_sheet.update(f'A{row_num}:J{row_num}', values)
+                    self.story_sheet.update(f'A{row_num}:K{row_num}', values)
                     logger.info(f"Updated story boss Lv{boss.level}")
                     return True
 
@@ -1724,6 +1838,7 @@ class SheetsManager:
                 boss.defense,
                 boss.speed,
                 boss.magic,
+                boss.luck,
                 boss.description
             ]]
             self.story_sheet.append_row(values[0])
@@ -1834,9 +1949,9 @@ class SheetsManager:
                 logger.info("StoryBosses sheet found")
             except:
                 # Create the sheet if it doesn't exist
-                self.story_sheet = self.sheet.add_worksheet(title="StoryBosses", rows=100, cols=10)
-                headers = ['Level', 'Name', 'Image URL', 'Sprite URL', 'HP', 'Attack', 'Defense', 'Speed', 'Magic', 'Description']
-                self.story_sheet.update('A1:J1', [headers])
+                self.story_sheet = self.sheet.add_worksheet(title="StoryBosses", rows=100, cols=11)
+                headers = ['Level', 'Name', 'Image URL', 'Sprite URL', 'HP', 'Attack', 'Defense', 'Speed', 'Magic', 'Luck', 'Description']
+                self.story_sheet.update('A1:K1', [headers])
                 logger.info("Created StoryBosses sheet")
 
         except Exception as e:
@@ -1863,3 +1978,221 @@ class SheetsManager:
         except Exception as e:
             logger.error(f"Error initializing story progress sheet: {e}")
             self.story_progress_sheet = None
+
+    def _fix_id_integrity(self):
+        """Fix character ID integrity issues (duplicates, gaps, wrong order)
+        Also updates references in BattleHistory, Rankings, and StoryProgress sheets
+        """
+        try:
+            if not self.online_mode:
+                return
+
+            logger.info("Checking character ID integrity...")
+            all_records = self.worksheet.get_all_records()
+
+            if not all_records:
+                return
+
+            # Check for duplicate IDs
+            ids = [record.get('ID') for record in all_records]
+            id_counts = {}
+            for id_val in ids:
+                id_counts[id_val] = id_counts.get(id_val, 0) + 1
+
+            duplicates = [id_val for id_val, count in id_counts.items() if count > 1]
+
+            if duplicates:
+                logger.warning(f"Found duplicate IDs: {duplicates}")
+
+            # Check for gaps or incorrect sequence
+            expected_id = 1
+            needs_fixing = False
+
+            for record in all_records:
+                current_id = record.get('ID')
+                if current_id != expected_id:
+                    needs_fixing = True
+                    break
+                expected_id += 1
+
+            # Fix if needed
+            if duplicates or needs_fixing:
+                logger.info("Fixing character IDs...")
+
+                # Create ID mapping (old_id -> new_id)
+                id_mapping = {}
+                for idx, record in enumerate(all_records):
+                    old_id = record.get('ID')
+                    new_id = idx + 1
+                    if old_id != new_id:
+                        id_mapping[old_id] = new_id
+
+                # Get all data (including header)
+                all_values = self.worksheet.get_all_values()
+
+                if len(all_values) <= 1:  # Only header or empty
+                    return
+
+                # Update IDs in Characters sheet (column A, starting from row 2)
+                updates = []
+                for idx in range(1, len(all_values)):  # Skip header
+                    new_id = idx
+                    updates.append([new_id])
+
+                # Batch update all IDs at once
+                if updates:
+                    cell_range = f"A2:A{len(all_values)}"
+                    self.worksheet.update(cell_range, updates)
+                    logger.info(f"✓ Fixed {len(updates)} character IDs in Characters sheet (1 to {len(updates)})")
+
+                # Update BattleHistory sheet
+                if id_mapping:
+                    self._update_battle_history_ids(id_mapping)
+
+                # Update Rankings sheet
+                if id_mapping:
+                    self._update_rankings_ids(id_mapping)
+
+                # Update StoryProgress sheet
+                if id_mapping:
+                    self._update_story_progress_ids(id_mapping)
+
+            else:
+                logger.info("Character IDs are correct")
+
+        except Exception as e:
+            logger.error(f"Error fixing ID integrity: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+    def _update_battle_history_ids(self, id_mapping: dict):
+        """Update character IDs in BattleHistory sheet"""
+        try:
+            if not hasattr(self, 'battle_history_sheet') or self.battle_history_sheet is None:
+                return
+
+            logger.info("Updating BattleHistory sheet IDs...")
+            all_values = self.battle_history_sheet.get_all_values()
+
+            if len(all_values) <= 1:  # Only header or empty
+                return
+
+            # Columns: Battle ID, Date, Fighter 1 ID, Fighter 1 Name, Fighter 2 ID, ...
+            # Fighter 1 ID is column C (index 2), Fighter 2 ID is column E (index 4)
+            # Winner ID is column F (index 5)
+            updates_needed = False
+
+            for row_idx in range(1, len(all_values)):  # Skip header
+                row = all_values[row_idx]
+                if len(row) < 6:
+                    continue
+
+                # Update Fighter 1 ID (column C, index 2)
+                if len(row) > 2 and row[2]:
+                    try:
+                        old_id = int(row[2])
+                        if old_id in id_mapping:
+                            self.battle_history_sheet.update_cell(row_idx + 1, 3, id_mapping[old_id])
+                            updates_needed = True
+                    except (ValueError, TypeError):
+                        pass
+
+                # Update Fighter 2 ID (column E, index 4)
+                if len(row) > 4 and row[4]:
+                    try:
+                        old_id = int(row[4])
+                        if old_id in id_mapping:
+                            self.battle_history_sheet.update_cell(row_idx + 1, 5, id_mapping[old_id])
+                            updates_needed = True
+                    except (ValueError, TypeError):
+                        pass
+
+                # Update Winner ID (column F, index 5)
+                if len(row) > 5 and row[5]:
+                    try:
+                        old_id = int(row[5])
+                        if old_id in id_mapping:
+                            self.battle_history_sheet.update_cell(row_idx + 1, 6, id_mapping[old_id])
+                            updates_needed = True
+                    except (ValueError, TypeError):
+                        pass
+
+            if updates_needed:
+                logger.info("✓ Updated BattleHistory sheet IDs")
+
+        except Exception as e:
+            logger.error(f"Error updating BattleHistory IDs: {e}")
+
+    def _update_rankings_ids(self, id_mapping: dict):
+        """Update character IDs in Rankings sheet"""
+        try:
+            if not hasattr(self, 'ranking_sheet') or self.ranking_sheet is None:
+                return
+
+            logger.info("Updating Rankings sheet IDs...")
+            all_values = self.ranking_sheet.get_all_values()
+
+            if len(all_values) <= 1:  # Only header or empty
+                return
+
+            # Columns: Rank, Character ID, Character Name, ...
+            # Character ID is column B (index 1)
+            updates_needed = False
+
+            for row_idx in range(1, len(all_values)):  # Skip header
+                row = all_values[row_idx]
+                if len(row) < 2:
+                    continue
+
+                # Update Character ID (column B, index 1)
+                if row[1]:
+                    try:
+                        old_id = int(row[1])
+                        if old_id in id_mapping:
+                            self.ranking_sheet.update_cell(row_idx + 1, 2, id_mapping[old_id])
+                            updates_needed = True
+                    except (ValueError, TypeError):
+                        pass
+
+            if updates_needed:
+                logger.info("✓ Updated Rankings sheet IDs")
+
+        except Exception as e:
+            logger.error(f"Error updating Rankings IDs: {e}")
+
+    def _update_story_progress_ids(self, id_mapping: dict):
+        """Update character IDs in StoryProgress sheet"""
+        try:
+            if not hasattr(self, 'story_progress_sheet') or self.story_progress_sheet is None:
+                return
+
+            logger.info("Updating StoryProgress sheet IDs...")
+            all_values = self.story_progress_sheet.get_all_values()
+
+            if len(all_values) <= 1:  # Only header or empty
+                return
+
+            # Columns: Character ID, Current Level, ...
+            # Character ID is column A (index 0)
+            updates_needed = False
+
+            for row_idx in range(1, len(all_values)):  # Skip header
+                row = all_values[row_idx]
+                if len(row) < 1:
+                    continue
+
+                # Update Character ID (column A, index 0)
+                if row[0]:
+                    try:
+                        old_id = int(row[0])
+                        if old_id in id_mapping:
+                            self.story_progress_sheet.update_cell(row_idx + 1, 1, id_mapping[old_id])
+                            updates_needed = True
+                    except (ValueError, TypeError):
+                        pass
+
+            if updates_needed:
+                logger.info("✓ Updated StoryProgress sheet IDs")
+
+        except Exception as e:
+            logger.error(f"Error updating StoryProgress IDs: {e}")

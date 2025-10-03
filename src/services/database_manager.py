@@ -64,9 +64,9 @@ class DatabaseManager:
         try:
             query = """
                 INSERT OR REPLACE INTO characters
-                (id, name, hp, attack, defense, speed, magic, description,
+                (id, name, hp, attack, defense, speed, magic, luck, description,
                  image_path, sprite_path, created_at, battle_count, win_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
 
             # Convert paths to relative before saving
@@ -81,6 +81,7 @@ class DatabaseManager:
                 character.defense,
                 character.speed,
                 character.magic,
+                character.luck,
                 character.description,
                 rel_image_path,
                 rel_sprite_path,
@@ -519,8 +520,8 @@ class DatabaseManager:
     def _row_to_character_dict(self, row) -> Dict[str, Any]:
         """Convert database row to character dictionary"""
         # Convert relative paths to absolute when loading
-        abs_image_path = self._to_absolute_path(row[8]) if row[8] else ""
-        abs_sprite_path = self._to_absolute_path(row[9]) if row[9] else ""
+        abs_image_path = self._to_absolute_path(row[9]) if row[9] else ""
+        abs_sprite_path = self._to_absolute_path(row[10]) if row[10] else ""
 
         return {
             'id': row[0],
@@ -530,12 +531,13 @@ class DatabaseManager:
             'defense': row[4],
             'speed': row[5],
             'magic': row[6],
-            'description': row[7] if row[7] else "",
+            'luck': row[7],
+            'description': row[8] if row[8] else "",
             'image_path': abs_image_path,
             'sprite_path': abs_sprite_path,
-            'created_at': row[10],
-            'battle_count': row[11],
-            'win_count': row[12]
+            'created_at': row[11],
+            'battle_count': row[12],
+            'win_count': row[13]
         }
     
     def _row_to_battle_dict(self, row) -> Dict[str, Any]:

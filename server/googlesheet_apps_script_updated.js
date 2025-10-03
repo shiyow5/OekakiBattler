@@ -159,7 +159,7 @@ function handleRegisterCharacterManual(payload) {
     var now = new Date();
 
     // キャラクターデータを追加
-    // 列: ID, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic, Description, Created At, Wins, Losses, Draws
+    // 列: ID, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic, Luck, Description, Created At, Wins, Losses, Draws
     sheet.appendRow([
       newId,
       characterData.name,
@@ -170,6 +170,7 @@ function handleRegisterCharacterManual(payload) {
       characterData.defense,
       characterData.speed,
       characterData.magic,
+      characterData.luck || 50, // Luck（デフォルト50）
       characterData.description,
       now,
       0, // Wins
@@ -188,6 +189,7 @@ function handleRegisterCharacterManual(payload) {
         defense: characterData.defense,
         speed: characterData.speed,
         magic: characterData.magic,
+        luck: characterData.luck || 50,
         description: characterData.description
       }
     })).setMimeType(ContentService.MimeType.JSON);
@@ -236,6 +238,7 @@ function handleRegisterCharacterAuto(payload) {
       0,            // Defense (0 - AI生成待ち)
       0,            // Speed (0 - AI生成待ち)
       0,            // Magic (0 - AI生成待ち)
+      0,            // Luck (0 - AI生成待ち)
       '',           // Description (空 - AI生成待ち)
       now,          // Created At
       0,            // Wins

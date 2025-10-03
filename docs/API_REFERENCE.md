@@ -31,11 +31,12 @@ from src.models import Character
 class Character(BaseModel):
     id: str                    # Unique identifier (UUID)
     name: str                  # Character name
-    hp: int                    # Health Points (50-150)
-    attack: int                # Attack power (30-120)
-    defense: int               # Defense power (20-100)
-    speed: int                 # Speed (40-130)
+    hp: int                    # Health Points (10-200)
+    attack: int                # Attack power (10-150)
+    defense: int               # Defense power (10-100)
+    speed: int                 # Speed (10-100)
     magic: int                 # Magic power (10-100)
+    luck: int                  # Luck (0-100)
     description: str           # Character description
     image_path: str            # Original image file path
     sprite_path: Optional[str] # Processed sprite path
@@ -44,9 +45,13 @@ class Character(BaseModel):
     win_count: int            # Total wins
 ```
 
+**Stat Constraints:**
+- Total stats maximum: 350 (sum of hp + attack + defense + speed + magic + luck)
+- Model validator enforces this limit automatically
+
 **Properties:**
 - `win_rate: float` - Win rate percentage
-- `total_stats: int` - Sum of all stats
+- `total_stats: int` - Sum of all stats (includes luck)
 
 **Methods:**
 - `to_dict() -> dict` - Convert to dictionary for database storage
@@ -105,18 +110,23 @@ from src.models.story_boss import StoryBoss
 class StoryBoss(BaseModel):
     level: int                 # Boss level (1-5)
     name: str                  # Boss name
-    hp: int                    # Health Points (50-300)
-    attack: int                # Attack power (30-200)
-    defense: int               # Defense power (20-150)
-    speed: int                 # Speed (40-180)
+    hp: int                    # Health Points (10-300)
+    attack: int                # Attack power (10-200)
+    defense: int               # Defense power (10-150)
+    speed: int                 # Speed (10-150)
     magic: int                 # Magic power (10-150)
+    luck: int                  # Luck (0-100)
     description: str           # Boss description
     image_path: Optional[str]  # Original image file path/URL
     sprite_path: Optional[str] # Processed sprite path/URL
 ```
 
+**Stat Constraints:**
+- Total stats maximum: 500 (higher than regular characters)
+- Model validator enforces this limit automatically
+
 **Properties:**
-- Wider stat ranges compared to regular characters
+- Wider stat ranges and higher total limit compared to regular characters
 - Level determines boss difficulty (1=easiest, 5=hardest)
 
 **Methods:**
@@ -267,6 +277,17 @@ success = analyzer.test_api_connection()
 - Requires `GOOGLE_API_KEY` environment variable
 - Uses Google Gemini AI model
 - Includes fallback stat generation
+
+**Stat Generation:**
+- Analyzes visual features to determine stats:
+  - HP (10-200): Body size, robustness
+  - Attack (10-150): Weapons, muscular appearance
+  - Defense (10-100): Armor, shields
+  - Speed (10-100): Body type, limb length
+  - Magic (10-100): Magic items, mystical decorations
+  - Luck (0-100): Lucky symbols, bright expressions, sparkly decorations
+- Automatically enforces total stats ≤ 350
+- Proportionally scales down if AI generates stats exceeding limit
 
 ### BattleEngine
 
@@ -545,6 +566,7 @@ if success:
             defense=stats.defense,
             speed=stats.speed,
             magic=stats.magic,
+            luck=stats.luck,
             description=stats.description,
             image_path="character.png",
             sprite_path=sprite_path

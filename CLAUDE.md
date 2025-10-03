@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **Analog Drawing**: Users draw characters on paper
 2. **Digital Capture**: Drawings are scanned/photographed to create digital images
 3. **Character Extraction**: AI extracts and processes character sprites from the images
-4. **Stat Generation**: Google's Generative AI analyzes character illustrations and generates RPG-style stats (HP, attack, defense, speed, magic) and descriptions
+4. **Stat Generation**: Google's Generative AI analyzes character illustrations and generates RPG-style stats (HP, attack, defense, speed, magic, luck) and descriptions
 5. **Automated Battle**: Characters fight automatically on screen based on their generated stats - no user control during combat
 6. **Data Persistence**: Character data, battle history, and rankings are stored in Google Sheets (online mode) or local SQLite database (offline mode)
 
@@ -153,16 +153,19 @@ class Character(BaseModel):
     name: str
     image_path: str           # Local path or Google Drive URL
     sprite_path: str          # Local path or Google Drive URL
-    hp: int                   # 50-150
-    attack: int               # 30-120
-    defense: int              # 20-100
-    speed: int                # 40-130
+    hp: int                   # 10-200
+    attack: int               # 10-150
+    defense: int              # 10-100
+    speed: int                # 10-100
     magic: int                # 10-100
+    luck: int                 # 0-100
     description: str          # AI-generated description
     created_at: datetime
     wins: int = 0
     losses: int = 0
     draws: int = 0
+
+# Total stats constraint: Maximum 350 for all stats combined
 ```
 
 #### Battle Model (`src/models/battle.py`)
@@ -227,7 +230,20 @@ class StoryProgress(BaseModel):
 **Standard Battle (`battle_engine.py`)**
 - **Turn-Based Combat**: Speed determines action order
 - **Damage Calculation**: `damage = attack - defense + random_factor`
-- **Special Mechanics**: Critical hits (5%), magic attacks, evasion
+- **Special Mechanics**:
+  - Critical hits (5% base, max 35% with luck)
+  - Guard break (15% base, max 30% with luck, physical only)
+  - Magic attacks (50% defense penetration)
+  - Evasion (speed-based, max -30% hit with luck)
+- **Luck Mechanics**:
+  - Defender's luck reduces attacker's hit chance (max -30%)
+  - Attacker's luck increases critical hit chance (max +30%)
+  - Attacker's luck increases guard break chance (max +15%)
+- **Guard Break System**:
+  - Physical attacks only (magic excluded)
+  - Completely ignores defender's defense (Defense = 0)
+  - Can occur simultaneously with critical hits
+  - Visual: Blue explosion effect with 🛡️💥 indicator
 - **Battle Statistics**: Tracks damage dealt, final HP, result type
 - **Visual Display**: Real-time Pygame rendering with HP bars and animations
 
@@ -293,7 +309,8 @@ else:
 **Story Boss Manager (`story_boss_manager.py`)**
 - **Boss Editor**: Create/edit Lv1-5 bosses
 - **Image Upload**: Original image and sprite with transparency
-- **Stat Configuration**: HP (50-300), Attack (30-200), Defense (20-150), Speed (40-180), Magic (10-150)
+- **Stat Configuration**: HP (10-300), Attack (10-200), Defense (10-150), Speed (10-150), Magic (10-150), Luck (0-100)
+- **Total Stats Limit**: Maximum 500 for bosses (higher than character limit of 350)
 - **Auto Sprite Generation**: Background removal and transparency processing
 - **Google Drive Integration**: Automatic upload of boss images
 
@@ -301,8 +318,8 @@ else:
 
 The application manages 5 worksheets:
 
-**1. Characters Sheet (14 columns)**
-- ID, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic
+**1. Characters Sheet (15 columns)**
+- ID, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic, Luck
 - Description, Created At, Wins, Losses, Draws
 
 **2. BattleHistory Sheet (15 columns)**
@@ -313,8 +330,8 @@ The application manages 5 worksheets:
 - Rank, Character ID/Name, Total Battles, Wins/Losses/Draws
 - Win Rate (%), Avg Damage, Rating
 
-**4. StoryBosses Sheet (10 columns)**
-- Level, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic, Description
+**4. StoryBosses Sheet (11 columns)**
+- Level, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic, Luck, Description
 
 **5. StoryProgress Sheet (6 columns)**
 - Character ID, Current Level, Completed, Victories, Attempts, Last Played

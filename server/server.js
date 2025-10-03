@@ -24,6 +24,7 @@ const SESSION_STATE = {
   WAITING_FOR_DEFENSE: 'waiting_for_defense',
   WAITING_FOR_SPEED: 'waiting_for_speed',
   WAITING_FOR_MAGIC: 'waiting_for_magic',
+  WAITING_FOR_LUCK: 'waiting_for_luck',
   WAITING_FOR_DESCRIPTION: 'waiting_for_description',
 };
 
@@ -41,6 +42,7 @@ function initSession(userId) {
       defense: null,
       speed: null,
       magic: null,
+      luck: null,
       description: null,
     },
   };
@@ -217,67 +219,67 @@ async function handleEvent(event) {
           session.state = SESSION_STATE.WAITING_FOR_HP;
           await replyMessage(event.replyToken, {
             type: 'text',
-            text: 'HP（50-150）を入力してください：',
+            text: 'HP（10-200）を入力してください：',
           });
           break;
 
         case SESSION_STATE.WAITING_FOR_HP:
           const hp = parseInt(text);
-          if (isNaN(hp) || hp < 50 || hp > 150) {
+          if (isNaN(hp) || hp < 10 || hp > 200) {
             await replyMessage(event.replyToken, {
               type: 'text',
-              text: 'HPは50〜150の数値で入力してください。',
+              text: 'HPは10〜200の数値で入力してください。',
             });
           } else {
             session.characterData.hp = hp;
             session.state = SESSION_STATE.WAITING_FOR_ATTACK;
             await replyMessage(event.replyToken, {
               type: 'text',
-              text: '攻撃力（30-120）を入力してください：',
+              text: '攻撃力（10-150）を入力してください：',
             });
           }
           break;
 
         case SESSION_STATE.WAITING_FOR_ATTACK:
           const attack = parseInt(text);
-          if (isNaN(attack) || attack < 30 || attack > 120) {
+          if (isNaN(attack) || attack < 10 || attack > 150) {
             await replyMessage(event.replyToken, {
               type: 'text',
-              text: '攻撃力は30〜120の数値で入力してください。',
+              text: '攻撃力は10〜150の数値で入力してください。',
             });
           } else {
             session.characterData.attack = attack;
             session.state = SESSION_STATE.WAITING_FOR_DEFENSE;
             await replyMessage(event.replyToken, {
               type: 'text',
-              text: '防御力（20-100）を入力してください：',
+              text: '防御力（10-100）を入力してください：',
             });
           }
           break;
 
         case SESSION_STATE.WAITING_FOR_DEFENSE:
           const defense = parseInt(text);
-          if (isNaN(defense) || defense < 20 || defense > 100) {
+          if (isNaN(defense) || defense < 10 || defense > 100) {
             await replyMessage(event.replyToken, {
               type: 'text',
-              text: '防御力は20〜100の数値で入力してください。',
+              text: '防御力は10〜100の数値で入力してください。',
             });
           } else {
             session.characterData.defense = defense;
             session.state = SESSION_STATE.WAITING_FOR_SPEED;
             await replyMessage(event.replyToken, {
               type: 'text',
-              text: '素早さ（40-130）を入力してください：',
+              text: '素早さ（10-100）を入力してください：',
             });
           }
           break;
 
         case SESSION_STATE.WAITING_FOR_SPEED:
           const speed = parseInt(text);
-          if (isNaN(speed) || speed < 40 || speed > 130) {
+          if (isNaN(speed) || speed < 10 || speed > 100) {
             await replyMessage(event.replyToken, {
               type: 'text',
-              text: '素早さは40〜130の数値で入力してください。',
+              text: '素早さは10〜100の数値で入力してください。',
             });
           } else {
             session.characterData.speed = speed;
@@ -298,11 +300,42 @@ async function handleEvent(event) {
             });
           } else {
             session.characterData.magic = magic;
-            session.state = SESSION_STATE.WAITING_FOR_DESCRIPTION;
+            session.state = SESSION_STATE.WAITING_FOR_LUCK;
             await replyMessage(event.replyToken, {
               type: 'text',
-              text: 'キャラクターの説明を入力してください：',
+              text: '運（0-100）を入力してください：',
             });
+          }
+          break;
+
+        case SESSION_STATE.WAITING_FOR_LUCK:
+          const luck = parseInt(text);
+          if (isNaN(luck) || luck < 0 || luck > 100) {
+            await replyMessage(event.replyToken, {
+              type: 'text',
+              text: '運は0〜100の数値で入力してください。',
+            });
+          } else {
+            session.characterData.luck = luck;
+
+            // Check total stats limit (350)
+            const totalStats = session.characterData.hp + session.characterData.attack +
+                              session.characterData.defense + session.characterData.speed +
+                              session.characterData.magic + session.characterData.luck;
+
+            if (totalStats > 350) {
+              await replyMessage(event.replyToken, {
+                type: 'text',
+                text: `ステータス合計が350を超えています（合計: ${totalStats}）。\n\n各ステータスを調整してください。最初からやり直すには画像を再送信してください。`,
+              });
+              clearSession(userId);
+            } else {
+              session.state = SESSION_STATE.WAITING_FOR_DESCRIPTION;
+              await replyMessage(event.replyToken, {
+                type: 'text',
+                text: 'キャラクターの説明を入力してください：',
+              });
+            }
           }
           break;
 
@@ -369,9 +402,10 @@ async function registerCharacterManual(replyToken, session) {
 
     if (response.data && response.data.ok) {
       const char = session.characterData;
+      const totalStats = char.hp + char.attack + char.defense + char.speed + char.magic + char.luck;
       await replyMessage(replyToken, {
         type: 'text',
-        text: `キャラクター「${char.name}」を登録しました！\n\nステータス：\nHP: ${char.hp}\n攻撃: ${char.attack}\n防御: ${char.defense}\n素早さ: ${char.speed}\n魔力: ${char.magic}\n\n説明: ${char.description}`,
+        text: `キャラクター「${char.name}」を登録しました！\n\nステータス：\nHP: ${char.hp}\n攻撃: ${char.attack}\n防御: ${char.defense}\n素早さ: ${char.speed}\n魔力: ${char.magic}\n運: ${char.luck}\n合計: ${totalStats}/350\n\n説明: ${char.description}`,
       });
     } else {
       await replyMessage(replyToken, {

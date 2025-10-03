@@ -99,13 +99,7 @@ function doPost(e) {
       var now = new Date();
       sheet.appendRow([now, filename, directUrl]);
 
-      // 画像をシートに貼り付け（オプション）
-      var lastRow = sheet.getLastRow();
-      try {
-        sheet.insertImage(file.getBlob(), 4, lastRow);
-      } catch (err) {
-        console.warn('insertImage failed:', err);
-      }
+      // Note: 画像の埋め込みは削除（スプレッドシートのパフォーマンス低下を防ぐため）
     }
 
     return ContentService.createTextOutput(JSON.stringify({
@@ -179,7 +173,7 @@ function handleRegisterCharacterManual(payload, spreadsheetId) {
     var now = new Date();
 
     // キャラクターデータを追加
-    // 列: ID, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic, Description, Created At, Wins, Losses, Draws
+    // 列: ID, Name, Image URL, Sprite URL, HP, Attack, Defense, Speed, Magic, Luck, Description, Created At, Wins, Losses, Draws
     sheet.appendRow([
       newId,
       characterData.name,
@@ -190,6 +184,7 @@ function handleRegisterCharacterManual(payload, spreadsheetId) {
       characterData.defense,
       characterData.speed,
       characterData.magic,
+      characterData.luck || 50, // Luck（デフォルト50）
       characterData.description,
       now,
       0, // Wins
@@ -208,6 +203,7 @@ function handleRegisterCharacterManual(payload, spreadsheetId) {
         defense: characterData.defense,
         speed: characterData.speed,
         magic: characterData.magic,
+        luck: characterData.luck || 50,
         description: characterData.description
       }
     })).setMimeType(ContentService.MimeType.JSON);
@@ -255,6 +251,7 @@ function handleRegisterCharacterAuto(payload, spreadsheetId) {
       0,            // Defense (0 - AI生成待ち)
       0,            // Speed (0 - AI生成待ち)
       0,            // Magic (0 - AI生成待ち)
+      0,            // Luck (0 - AI生成待ち)
       '',           // Description (空 - AI生成待ち)
       now,          // Created At
       0,            // Wins

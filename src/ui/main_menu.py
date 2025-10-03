@@ -259,9 +259,9 @@ class MainMenuWindow:
         list_frame.rowconfigure(0, weight=1)
         
         # Treeview for characters (supports Japanese names)
-        columns = ('Name', 'HP', 'ATK', 'DEF', 'SPD', 'MAG', 'Battles', 'Wins')
+        columns = ('Name', 'HP', 'ATK', 'DEF', 'SPD', 'MAG', 'LCK', 'Battles', 'Wins')
         self.char_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15)
-        
+
         # Configure font to support Japanese characters in character list
         try:
             import tkinter.font as tkFont
@@ -270,7 +270,7 @@ class MainMenuWindow:
             self.char_tree.configure(style="Japanese.Treeview")
         except:
             pass
-        
+
         # Configure columns
         self.char_tree.heading('Name', text='Name')
         self.char_tree.heading('HP', text='HP')
@@ -278,9 +278,10 @@ class MainMenuWindow:
         self.char_tree.heading('DEF', text='DEF')
         self.char_tree.heading('SPD', text='SPD')
         self.char_tree.heading('MAG', text='MAG')
+        self.char_tree.heading('LCK', text='LCK')
         self.char_tree.heading('Battles', text='Battles')
         self.char_tree.heading('Wins', text='Wins')
-        
+
         # Column widths
         self.char_tree.column('Name', width=120)
         self.char_tree.column('HP', width=50)
@@ -288,6 +289,7 @@ class MainMenuWindow:
         self.char_tree.column('DEF', width=50)
         self.char_tree.column('SPD', width=50)
         self.char_tree.column('MAG', width=50)
+        self.char_tree.column('LCK', width=50)
         self.char_tree.column('Battles', width=60)
         self.char_tree.column('Wins', width=50)
         
@@ -536,6 +538,7 @@ class MainMenuWindow:
                     char.defense,
                     char.speed,
                     char.magic,
+                    char.luck,
                     char.battle_count,
                     f"{char.win_count} ({win_rate})"
                 ))
@@ -979,6 +982,7 @@ class CharacterRegistrationDialog:
         self.defense_var = tk.StringVar(value="50")
         self.speed_var = tk.StringVar(value="50")
         self.magic_var = tk.StringVar(value="50")
+        self.luck_var = tk.StringVar(value="50")
 
         ttk.Label(stats_frame, text="HP:").grid(row=0, column=0, sticky=tk.W)
         ttk.Entry(stats_frame, textvariable=self.hp_var, width=10).grid(row=0, column=1, sticky=tk.W, padx=(10, 20))
@@ -992,6 +996,16 @@ class CharacterRegistrationDialog:
 
         ttk.Label(stats_frame, text="Magic:").grid(row=2, column=0, sticky=tk.W)
         ttk.Entry(stats_frame, textvariable=self.magic_var, width=10).grid(row=2, column=1, sticky=tk.W, padx=(10, 20))
+        ttk.Label(stats_frame, text="Luck:").grid(row=2, column=2, sticky=tk.W)
+        ttk.Entry(stats_frame, textvariable=self.luck_var, width=10).grid(row=2, column=3, sticky=tk.W, padx=(10, 0))
+
+        # Total stats label
+        self.total_stats_label = ttk.Label(stats_frame, text="Total: 300/350", foreground="blue")
+        self.total_stats_label.grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(5, 0))
+
+        # Bind stat changes to update total
+        for var in [self.hp_var, self.attack_var, self.defense_var, self.speed_var, self.magic_var, self.luck_var]:
+            var.trace('w', self._update_total_stats)
         
         # Description (supports Japanese and English)
         ttk.Label(details_frame, text="Description (説明):").grid(row=2, column=0, sticky=(tk.W, tk.N), pady=(10, 0))
@@ -1070,6 +1084,26 @@ class CharacterRegistrationDialog:
             messagebox.showerror("Error", f"Failed to analyze image: {e}")
             self._reset_cursor()
     
+    def _update_total_stats(self, *args):
+        """Update total stats display"""
+        try:
+            total = 0
+            for var in [self.hp_var, self.attack_var, self.defense_var, self.speed_var, self.magic_var, self.luck_var]:
+                try:
+                    total += int(var.get())
+                except:
+                    pass
+
+            # Update label color based on total
+            if total > 350:
+                self.total_stats_label.config(text=f"Total: {total}/350", foreground="red")
+            elif total == 350:
+                self.total_stats_label.config(text=f"Total: {total}/350", foreground="green")
+            else:
+                self.total_stats_label.config(text=f"Total: {total}/350", foreground="blue")
+        except Exception as e:
+            logger.error(f"Error updating total stats: {e}")
+
     def _update_stats(self, stats):
         """Update stats display"""
         try:
@@ -1078,12 +1112,13 @@ class CharacterRegistrationDialog:
             self.defense_var.set(str(stats.defense))
             self.speed_var.set(str(stats.speed))
             self.magic_var.set(str(stats.magic))
-            
+            self.luck_var.set(str(stats.luck))
+
             self.description_text.delete(1.0, tk.END)
             self.description_text.insert(tk.END, stats.description)
-            
+
             messagebox.showinfo("Success", "Image analysis completed!")
-            
+
         except Exception as e:
             logger.error(f"Error updating stats: {e}")
             messagebox.showerror("Error", f"Failed to update stats: {e}")
@@ -1116,22 +1151,32 @@ class CharacterRegistrationDialog:
                 defense = int(self.defense_var.get())
                 speed = int(self.speed_var.get())
                 magic = int(self.magic_var.get())
+                luck = int(self.luck_var.get())
 
                 # Validate stat ranges (each stat has different range)
-                if not (50 <= hp <= 150):
-                    messagebox.showwarning("Warning", "HP must be between 50 and 150")
+                if not (10 <= hp <= 200):
+                    messagebox.showwarning("Warning", "HP must be between 10 and 200")
                     return
-                if not (30 <= attack <= 120):
-                    messagebox.showwarning("Warning", "Attack must be between 30 and 120")
+                if not (10 <= attack <= 150):
+                    messagebox.showwarning("Warning", "Attack must be between 10 and 150")
                     return
-                if not (20 <= defense <= 100):
-                    messagebox.showwarning("Warning", "Defense must be between 20 and 100")
+                if not (10 <= defense <= 100):
+                    messagebox.showwarning("Warning", "Defense must be between 10 and 100")
                     return
-                if not (40 <= speed <= 130):
-                    messagebox.showwarning("Warning", "Speed must be between 40 and 130")
+                if not (10 <= speed <= 100):
+                    messagebox.showwarning("Warning", "Speed must be between 10 and 100")
                     return
                 if not (10 <= magic <= 100):
                     messagebox.showwarning("Warning", "Magic must be between 10 and 100")
+                    return
+                if not (0 <= luck <= 100):
+                    messagebox.showwarning("Warning", "Luck must be between 0 and 100")
+                    return
+
+                # Check total stats limit
+                total_stats = hp + attack + defense + speed + magic + luck
+                if total_stats > 350:
+                    messagebox.showwarning("Warning", f"Total stats ({total_stats}) exceeds maximum allowed (350)")
                     return
 
             except ValueError:
@@ -1168,6 +1213,7 @@ class CharacterRegistrationDialog:
                         defense=defense,
                         speed=speed,
                         magic=magic,
+                        luck=luck,
                         description=description,
                         image_path=image_path,
                         sprite_path=sprite_path
@@ -2208,9 +2254,9 @@ class SettingsWindow:
         speed_frame = ttk.Frame(battle_frame)
         speed_frame.pack(fill=tk.X, pady=5)
         ttk.Label(speed_frame, text="バトル速度:").pack(side=tk.LEFT)
-        
+
         self.battle_speed_var = tk.DoubleVar(value=self.settings['battle_speed'])
-        speed_scale = tk.Scale(speed_frame, from_=0.01, to=3.0, resolution=0.01, 
+        speed_scale = tk.Scale(speed_frame, from_=0.01, to=1.0, resolution=0.01,
                               orient=tk.HORIZONTAL, variable=self.battle_speed_var)
         speed_scale.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 0))
         

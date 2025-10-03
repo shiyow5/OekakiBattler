@@ -14,7 +14,7 @@
 
 ## 概要
 
-お絵描きバトラーのバトルシステムは、ターンベースの戦闘システムです。各キャラクターは5つの基本ステータスを持ち、これらの数値に基づいて自動的に戦闘が進行します。
+お絵描きバトラーのバトルシステムは、ターンベースの戦闘システムです。各キャラクターは6つの基本ステータスを持ち、これらの数値に基づいて自動的に戦闘が進行します。
 
 ### 基本原則
 - **ターンベース**: 素早さによって行動順が決定
@@ -30,16 +30,21 @@
 
 | ステータス | 範囲 | 効果 |
 |---|---|---|
-| **HP（体力）** | 50-150 | 生命力。0になると敗北 |
-| **Attack（攻撃力）** | 30-120 | 物理攻撃のダメージに影響 |
-| **Defense（防御力）** | 20-100 | 受けるダメージを軽減 |
-| **Speed（素早さ）** | 40-130 | 行動順と命中率に影響 |
+| **HP（体力）** | 10-200 | 生命力。0になると敗北 |
+| **Attack（攻撃力）** | 10-150 | 物理攻撃のダメージに影響 |
+| **Defense（防御力）** | 10-100 | 受けるダメージを軽減 |
+| **Speed（素早さ）** | 10-100 | 行動順と命中率に影響 |
 | **Magic（魔力）** | 10-100 | 魔法攻撃のダメージと使用頻度に影響 |
+| **Luck（運）** | 0-100 | 相手の命中率低下・自分のクリティカル率上昇 |
+
+**ステータス制約:**
+- 全ステータスの合計は最大350まで
+- キャラクター作成時に自動検証
 
 ### 計算式
 ```python
 # 総合ステータス
-total_stats = hp + attack + defense + speed + magic
+total_stats = hp + attack + defense + speed + magic + luck
 
 # 勝率（戦績がある場合）
 win_rate = (win_count / battle_count) * 100
@@ -128,11 +133,21 @@ while turn_number <= MAX_TURNS:  # 最大50ターン
 ```python
 def calculate_hit_chance(attacker: Character, defender: Character):
     speed_diff = attacker.speed - defender.speed
-    hit_chance = max(0.8, min(0.95, 0.85 + speed_diff * 0.001))
-    
-    # 命中率範囲: 80% - 95%
+    base_hit_chance = max(0.8, min(0.95, 0.85 + speed_diff * 0.001))
+
+    # 防御側の運により命中率低下（最大-30%）
+    luck_modifier = (defender.luck / 100) * 0.3
+    hit_chance = max(0.55, base_hit_chance - luck_modifier)
+
+    # 命中率範囲: 55% - 95%
     return random.random() <= hit_chance
 ```
+
+**運の効果:**
+- 防御側の運が高いほど、攻撃を回避しやすくなる
+- 運100の場合: 命中率が30%低下
+- 運50の場合: 命中率が15%低下
+- 運0の場合: 影響なし
 
 ### ⚔️ 物理攻撃ダメージ
 
@@ -165,17 +180,63 @@ def calculate_magic_damage(attacker: Character, defender: Character):
 ### ⭐ クリティカルヒット
 
 ```python
-def check_critical_hit(action_type: str):
-    critical_chance = 0.05  # 基本5%
-    
+def check_critical_hit(attacker: Character, action_type: str):
+    base_critical_chance = 0.05  # 基本5%
+
     if action_type == "magic":
-        critical_chance *= 0.7  # 魔法は3.5%
-    
+        base_critical_chance *= 0.7  # 魔法は3.5%
+
+    # 攻撃側の運によりクリティカル率上昇（最大+30%）
+    luck_crit_bonus = (attacker.luck / 100) * 0.3
+    critical_chance = min(0.35, base_critical_chance + luck_crit_bonus)
+
     is_critical = random.random() < critical_chance
     multiplier = 2.0 if is_critical else 1.0
-    
+
     return is_critical, multiplier
 ```
+
+**運の効果:**
+- 攻撃側の運が高いほど、クリティカルが発生しやすくなる
+- 運100の場合: クリティカル率+30%（物理35%、魔法33.5%）
+- 運50の場合: クリティカル率+15%（物理20%、魔法18.5%）
+- 運0の場合: 影響なし（物理5%、魔法3.5%）
+- 最大クリティカル率: 35%
+
+### 🛡️💥 ガードブレイク
+
+```python
+def check_guard_break(attacker: Character, action_type: str):
+    # 物理攻撃のみ発動
+    if action_type == "magic":
+        return False
+
+    # 基本確率15%
+    base_guard_break_chance = 0.15
+
+    # 攻撃側の運によりガードブレイク率上昇（最大+15%）
+    luck_guard_break_bonus = (attacker.luck / 100) * 0.15
+    guard_break_chance = min(0.30, base_guard_break_chance + luck_guard_break_bonus)
+
+    is_guard_break = random.random() < guard_break_chance
+
+    # ガードブレイク発動時は防御力を完全無視
+    effective_defense = 0 if is_guard_break else defender.defense
+
+    return is_guard_break
+```
+
+**ガードブレイクの効果:**
+- **発動条件**: 物理攻撃のみ（魔法攻撃は対象外）
+- **基本確率**: 15%
+- **運の効果**: 攻撃側の運が高いほど発動率上昇（最大+15%）
+  - 運100の場合: 30%（15% + 15%）
+  - 運50の場合: 22.5%（15% + 7.5%）
+  - 運0の場合: 15%（基本値のみ）
+- **効果**: 防御力を完全に無視（Defense = 0として計算）
+- **重複**: クリティカルヒットと同時発動可能
+- **視覚効果**: 青い爆発エフェクト（盾が砕ける演出）
+- **ログ表示**: 🛡️💥ガードブレイク！
 
 ---
 
@@ -202,8 +263,9 @@ final_hit_rate = clamp(base_hit_rate + speed_bonus, 80%, 95%)
 | 要素 | 基本確率 | 条件修正 |
 |---|---|---|
 | **魔法使用** | `min(40%, magic/200)` | 高防御相手+20%, 瀕死相手+15% |
-| **クリティカル** | 5% | 魔法時は3.5% |
-| **命中** | 85% | 素早さ差で80-95%の範囲 |
+| **クリティカル** | 5% | 魔法時は3.5%、運による最大+30% |
+| **ガードブレイク** | 15% | 物理攻撃のみ、運による最大+15% |
+| **命中** | 85% | 素早さ差で80-95%、運による最大-30% |
 
 ---
 
@@ -219,11 +281,16 @@ final_hit_rate = clamp(base_hit_rate + speed_bonus, 80%, 95%)
 
 | ステータス | 範囲 | 通常キャラとの差異 |
 |---|---|---|
-| **HP（体力）** | 50-300 | 最大値が2倍（通常:150） |
-| **Attack（攻撃力）** | 30-200 | 最大値が1.67倍（通常:120） |
-| **Defense（防御力）** | 20-150 | 最大値が1.5倍（通常:100） |
-| **Speed（素早さ）** | 40-180 | 最大値が1.38倍（通常:130） |
+| **HP（体力）** | 10-300 | 最大値が1.5倍（通常:200） |
+| **Attack（攻撃力）** | 10-200 | 最大値が1.33倍（通常:150） |
+| **Defense（防御力）** | 10-150 | 最大値が1.5倍（通常:100） |
+| **Speed（素早さ）** | 10-150 | 最大値が1.5倍（通常:100） |
 | **Magic（魔力）** | 10-150 | 最大値が1.5倍（通常:100） |
+| **Luck（運）** | 0-100 | 通常キャラと同じ |
+
+**ボスステータス制約:**
+- 全ステータスの合計は最大500まで（通常キャラ:350）
+- より強力なステータス設定が可能
 
 #### 進行システム
 
