@@ -188,8 +188,8 @@ class BattleEngine:
             char2_current_hp = char2.hp
 
             # Add battle start log
-            battle.add_log_entry(f"🥊 バトル開始！ {char1.name} VS {char2.name}")
-            battle.add_log_entry(f"💚 {char1.name} HP: {char1_current_hp} / {char2.name} HP: {char2_current_hp}")
+            battle.add_log_entry(f"[START] バトル開始！ {char1.name} VS {char2.name}")
+            battle.add_log_entry(f"[HP] {char1.name} HP: {char1_current_hp} / {char2.name} HP: {char2_current_hp}")
 
             # Initialize display if visual mode
             if visual_mode:
@@ -270,7 +270,7 @@ class BattleEngine:
                 logger.info(f"Battle ended by KO (actions: {action_count}/{max_actions})")
             elif action_count >= max_actions:
                 logger.info(f"Battle ended by time limit (max turns: {self.max_turns}, max actions: {max_actions})")
-                battle.add_log_entry(f"⏰ {self.max_turns}ターン経過！時間切れです！")
+                battle.add_log_entry(f"[TIME UP] {self.max_turns}ターン経過！時間切れです！")
 
             # Calculate battle statistics
             battle.char1_final_hp = char1_current_hp
@@ -307,12 +307,12 @@ class BattleEngine:
             
             # Add final log
             if battle.winner_id:
-                battle.add_log_entry(f"🎉 バトル終了！勝者: {winner_name}")
+                battle.add_log_entry(f"[WIN!] バトル終了！勝者: {winner_name}")
             else:
-                battle.add_log_entry("⚖️ バトル終了！引き分け！")
-            
-            battle.add_log_entry(f"⏱️ バトル時間: {battle.duration:.2f}秒")
-            battle.add_log_entry(f"🔄 総ターン数: {len(battle.turns)}")
+                battle.add_log_entry("[DRAW] バトル終了！引き分け！")
+
+            battle.add_log_entry(f"[TIME] バトル時間: {battle.duration:.2f}秒")
+            battle.add_log_entry(f"[TURNS] 総ターン数: {len(battle.turns)}")
             
             logger.info(f"Battle completed: Winner - {winner_name}")
             
@@ -495,27 +495,27 @@ class BattleEngine:
         """Create descriptive log message for a turn"""
         try:
             if turn.is_miss:
-                return f"💨 {attacker.name}の攻撃は外れた！"
+                return f"[MISS] {attacker.name}の攻撃は外れた！"
 
             # Guard break message (can occur with critical)
             guard_break_msg = ""
             if turn.is_guard_break:
-                guard_break_msg = "🛡️💥ガードブレイク！"
+                guard_break_msg = "[GB!]"
 
             if turn.action_type == "magic":
                 if turn.is_critical:
-                    return f"✨💥 {attacker.name}のクリティカル魔法攻撃！{defender.name}に{turn.damage}ダメージ！"
+                    return f"[CRIT!] {attacker.name}の魔法攻撃！{defender.name}に{turn.damage}ダメージ！"
                 else:
-                    return f"🔮 {attacker.name}の魔法攻撃！{defender.name}に{turn.damage}ダメージ"
+                    return f"[MAGIC] {attacker.name}の魔法攻撃！{defender.name}に{turn.damage}ダメージ"
             else:
                 if turn.is_critical and turn.is_guard_break:
-                    return f"⚔️💥 {attacker.name}のクリティカル攻撃！{guard_break_msg}{defender.name}に{turn.damage}ダメージ！"
+                    return f"[CRIT!]{guard_break_msg} {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ！"
                 elif turn.is_critical:
-                    return f"⚔️💥 {attacker.name}のクリティカル攻撃！{defender.name}に{turn.damage}ダメージ！"
+                    return f"[CRIT!] {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ！"
                 elif turn.is_guard_break:
-                    return f"⚔️ {attacker.name}の攻撃！{guard_break_msg}{defender.name}に{turn.damage}ダメージ！"
+                    return f"{guard_break_msg} {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ！"
                 else:
-                    return f"⚔️ {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ"
+                    return f"[ATK] {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ"
 
         except Exception as e:
             logger.error(f"Error creating turn log: {e}")

@@ -34,11 +34,17 @@ class AudioManager:
                 logger.warning(f"Failed to initialize audio system: {e}")
                 self.enabled = False
     
-    def load_sound(self, name: str, filename: str) -> bool:
-        """Load a sound effect"""
+    def load_sound(self, name: str, filename: str, suppress_warning: bool = False) -> bool:
+        """Load a sound effect
+
+        Args:
+            name: Internal name for the sound
+            filename: File name to load
+            suppress_warning: If True, don't log warning when file not found
+        """
         if not self.enabled:
             return False
-            
+
         try:
             sound_path = Settings.SOUNDS_DIR / filename
             if sound_path.exists():
@@ -48,9 +54,10 @@ class AudioManager:
                 logger.debug(f"Loaded sound: {name}")
                 return True
             else:
-                logger.warning(f"Sound file not found: {sound_path}")
+                if not suppress_warning:
+                    logger.warning(f"Sound file not found: {sound_path}")
                 return False
-                
+
         except pygame.error as e:
             logger.warning(f"Failed to load sound {name}: {e}")
             return False
@@ -242,8 +249,10 @@ class AudioManager:
             for name, config in sound_defs.items():
                 # Try to load from file first
                 loaded = False
-                for filename in config["files"]:
-                    if self.load_sound(name, filename):
+                for i, filename in enumerate(config["files"]):
+                    # Suppress warning for all but the last file
+                    suppress = (i < len(config["files"]) - 1)
+                    if self.load_sound(name, filename, suppress_warning=suppress):
                         loaded = True
                         logger.info(f"Loaded sound '{name}' from file: {filename}")
                         break
