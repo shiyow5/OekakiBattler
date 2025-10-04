@@ -5,6 +5,7 @@ Story mode battle engine
 import logging
 from typing import Optional, Dict, Any
 from pathlib import Path
+from datetime import datetime
 from src.models.character import Character
 from src.models.story_boss import StoryBoss, StoryProgress
 from src.services.battle_engine import BattleEngine
@@ -63,7 +64,8 @@ class StoryModeEngine:
                 return None
 
             # Convert StoryBoss to Character for battle
-            boss_character = Character(
+            # Use model_construct to bypass validation (bosses can have up to 500 total stats)
+            boss_character = Character.model_construct(
                 id=f"boss_lv{boss_level}",
                 name=boss.name,
                 hp=boss.hp,
@@ -71,13 +73,26 @@ class StoryModeEngine:
                 defense=boss.defense,
                 speed=boss.speed,
                 magic=boss.magic,
+                luck=boss.luck,
                 description=boss.description,
                 image_path=boss.image_path or "",
-                sprite_path=boss.sprite_path or ""
+                sprite_path=boss.sprite_path or "",
+                created_at=datetime.now(),
+                battle_count=0,
+                win_count=0
             )
 
             # Create battle engine
             self.battle_engine = BattleEngine()
+
+            # Apply current settings to battle engine
+            try:
+                from src.services.settings_manager import settings_manager
+                settings_manager.apply_to_battle_engine(self.battle_engine)
+                logger.info("Applied settings to story mode battle engine")
+            except Exception as e:
+                logger.warning(f"Could not apply settings to story mode battle engine: {e}")
+
             self.battle_engine.character1 = player
             self.battle_engine.character2 = boss_character
 

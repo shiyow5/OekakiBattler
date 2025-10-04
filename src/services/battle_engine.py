@@ -744,10 +744,16 @@ class BattleEngine:
             self._draw_hp_bars(char1, char2, char1_pos, char2_pos, char1_hp, char2_hp, shake_offset, scale)
 
             # Draw character names (below the character images)
-            name1_surface = self.font.render(char1.name, True, (0, 0, 0))
-            name2_surface = self.font.render(char2.name, True, (0, 0, 0))
-            self.screen.blit(name1_surface, (char1_pos[0] - int(40 * scale), char1_pos[1] + int(170 * scale)))
-            self.screen.blit(name2_surface, (char2_pos[0] - int(40 * scale), char2_pos[1] + int(170 * scale)))
+            # Scale font size based on screen size
+            name_font_size = int(40 * scale)  # Increased from 28 base to 40 base
+            name_font = self._create_font(name_font_size)
+            name1_surface = name_font.render(char1.name, True, (0, 0, 0))
+            name2_surface = name_font.render(char2.name, True, (0, 0, 0))
+            # Center the name horizontally with character position
+            name1_rect = name1_surface.get_rect(center=(char1_pos[0], char1_pos[1] + int(170 * scale)))
+            name2_rect = name2_surface.get_rect(center=(char2_pos[0], char2_pos[1] + int(170 * scale)))
+            self.screen.blit(name1_surface, name1_rect)
+            self.screen.blit(name2_surface, name2_rect)
 
             # Draw effects
             if self.effects:
@@ -901,7 +907,10 @@ class BattleEngine:
                     pygame.draw.line(vs_bg, (color_value, color_value, color_value + 20), (0, y), (screen_width, y))
 
             # Calculate positions for character circles
-            circle_radius = int(150)
+            # Scale circle radius based on screen size
+            base_circle_radius = 250  # Increased from 150 to 250 for larger circles
+            screen_scale = min(screen_width / 1920, screen_height / 1080)  # Base resolution: 1920x1080
+            circle_radius = int(base_circle_radius * screen_scale)
             left_circle_x = screen_width // 5  # Move left character more to the left
             right_circle_x = screen_width * 4 // 5  # Move right character more to the right
             circle_y = screen_height // 2
@@ -921,8 +930,8 @@ class BattleEngine:
 
                 # Draw character 1 (left)
                 if char1_sprite:
-                    # Scale to fit in circle
-                    char_size = circle_radius * 2 - 40  # Leave some padding
+                    # Scale to fit in circle - increased size by reducing padding
+                    char_size = circle_radius * 2 - 10  # Reduced padding from 40 to 10 for larger images
                     original_w, original_h = char1_sprite.get_size()
                     scale_factor = min(char_size / original_w, char_size / original_h)
                     new_w = int(original_w * scale_factor)
@@ -933,8 +942,8 @@ class BattleEngine:
 
                 # Draw character 2 (right)
                 if char2_sprite:
-                    # Scale to fit in circle
-                    char_size = circle_radius * 2 - 40
+                    # Scale to fit in circle - increased size by reducing padding
+                    char_size = circle_radius * 2 - 10  # Reduced padding from 40 to 10 for larger images
                     original_w, original_h = char2_sprite.get_size()
                     scale_factor = min(char_size / original_w, char_size / original_h)
                     new_w = int(original_w * scale_factor)
@@ -944,11 +953,14 @@ class BattleEngine:
                     self.screen.blit(scaled_char2, char2_pos)
 
                 # Draw character names below circles
-                name_font = self._create_font(36)
+                # Scale font size based on screen size
+                name_font_size = int(36 * screen_scale * 1.5)  # Increased by 1.5x
+                name_font = self._create_font(name_font_size)
                 name1_surface = name_font.render(char1.name, True, (255, 255, 255))
                 name2_surface = name_font.render(char2.name, True, (255, 255, 255))
-                name1_rect = name1_surface.get_rect(center=(left_circle_x, circle_y + circle_radius + 40))
-                name2_rect = name2_surface.get_rect(center=(right_circle_x, circle_y + circle_radius + 40))
+                name_y_offset = int(40 * screen_scale)
+                name1_rect = name1_surface.get_rect(center=(left_circle_x, circle_y + circle_radius + name_y_offset))
+                name2_rect = name2_surface.get_rect(center=(right_circle_x, circle_y + circle_radius + name_y_offset))
 
                 # Draw with outline
                 for dx in [-2, 0, 2]:
@@ -987,7 +999,7 @@ class BattleEngine:
             pygame.draw.circle(self.screen, (255, 255, 255), (right_circle_x, circle_y), circle_radius)
 
             if char1_sprite:
-                char_size = circle_radius * 2 - 40
+                char_size = circle_radius * 2 - 10  # Reduced padding from 40 to 10 for larger images
                 original_w, original_h = char1_sprite.get_size()
                 scale_factor = min(char_size / original_w, char_size / original_h)
                 new_w = int(original_w * scale_factor)
@@ -997,7 +1009,7 @@ class BattleEngine:
                 self.screen.blit(scaled_char1, char1_pos)
 
             if char2_sprite:
-                char_size = circle_radius * 2 - 40
+                char_size = circle_radius * 2 - 10  # Reduced padding from 40 to 10 for larger images
                 original_w, original_h = char2_sprite.get_size()
                 scale_factor = min(char_size / original_w, char_size / original_h)
                 new_w = int(original_w * scale_factor)
@@ -1009,8 +1021,8 @@ class BattleEngine:
             # Draw names
             name1_surface = name_font.render(char1.name, True, (255, 255, 255))
             name2_surface = name_font.render(char2.name, True, (255, 255, 255))
-            name1_rect = name1_surface.get_rect(center=(left_circle_x, circle_y + circle_radius + 40))
-            name2_rect = name2_surface.get_rect(center=(right_circle_x, circle_y + circle_radius + 40))
+            name1_rect = name1_surface.get_rect(center=(left_circle_x, circle_y + circle_radius + name_y_offset))
+            name2_rect = name2_surface.get_rect(center=(right_circle_x, circle_y + circle_radius + name_y_offset))
 
             for dx in [-2, 0, 2]:
                 for dy in [-2, 0, 2]:
@@ -1256,7 +1268,7 @@ class BattleEngine:
 
             # Draw character images side by side (in the middle area)
             char_display_size = int(180 * scale)
-            char_y_winner = int(220 * scale_y)
+            char_y_winner = int(280 * scale_y)  # Moved down from 220 to 280
             char_x_offset = int(220 * scale_x)
 
             # Winner character (left side, larger)
@@ -1285,7 +1297,7 @@ class BattleEngine:
                     # Draw crown symbol above winner (using simple shapes instead of emoji)
                     crown_center_x = winner_pos[0] + new_w // 2
                     crown_center_y = winner_pos[1] - int(40 * scale)
-                    crown_size = scale
+                    crown_size = scale * 2.0  # Doubled crown size from scale to scale * 2.0
 
                     # Draw crown shape with triangles
                     crown_points = [
@@ -1316,7 +1328,7 @@ class BattleEngine:
                         scaled_loser = pygame.transform.scale(loser_sprite, (new_w, new_h))
 
                         # Draw white background for character
-                        char_y_loser = int(250 * scale_y)
+                        char_y_loser = int(310 * scale_y)  # Moved down from 250 to 310
                         loser_x_offset = int(80 * scale_x)
                         loser_pos = (screen_width // 2 + loser_x_offset, char_y_loser)
                         loser_border_padding = int(5 * scale)

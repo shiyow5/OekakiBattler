@@ -1,5 +1,103 @@
 # 変更履歴 (CHANGES.md)
 
+## 2025-10-05 (修正56): バトル表示の改善とストーリーモードのバグ修正
+
+### 変更内容
+バトル画面とカウントダウン画面の表示を改善し、画面サイズに応じた適切なスケーリングを実装しました。また、ストーリーモードのバトルスピード設定とボスステータス検証のバグを修正しました。
+
+### 主な変更
+
+#### 1. バトル画面の表示改善
+**キャラクター名:**
+- フォントサイズを画面サイズに応じて動的にスケール（基本40pt）
+- 名前をキャラクター画像の中心に横方向で揃えて配置
+
+#### 2. カウントダウン画面の表示改善
+**円とキャラクター画像:**
+- 円の基本半径を150から250に拡大（約1.67倍）
+- キャラクター画像のパディングを40から10に縮小（画像サイズ約3倍に拡大）
+- 画面サイズ（1920x1080基準）に応じて円とキャラクター画像が連動してスケール
+
+**キャラクター名:**
+- フォントサイズを画面サイズに応じて1.5倍に拡大
+- 名前の位置オフセットも画面サイズに連動
+
+#### 3. リザルト画面の表示改善
+**キャラクター配置:**
+- 勝利キャラのY座標を220から280に移動（60px下へ）
+- 敗北キャラのY座標を250から310に移動（60px下へ）
+
+**王冠マーク:**
+- 王冠のサイズを2倍に拡大（`crown_size = scale * 2.0`）
+
+#### 4. ストーリーモードのバグ修正
+**バトルスピード設定:**
+- `story_mode_engine.py`の`start_battle`メソッドで`BattleEngine`作成後に`settings_manager.apply_to_battle_engine()`を呼び出すように修正
+- ストーリーモードでもバトルスピード設定が正しく反映されるようになった
+
+**ボスステータス検証:**
+- `Character`モデルは合計ステータス350の制限があるが、ボスは500まで許可
+- `Character.model_construct()`を使用してPydantic検証をバイパスし、ボスキャラクターを作成
+- `datetime`モジュールのインポート追加
+
+### 変更ファイル
+
+#### バトルエンジン
+- `src/services/battle_engine.py`
+  - バトル画面: キャラクター名フォントサイズを動的スケール（748-756行目）
+  - バトル画面: 名前を`get_rect(center=...)`で中央揃え
+  - カウントダウン画面: 円の基本半径を250に拡大（911行目）
+  - カウントダウン画面: キャラクター画像のパディングを10に縮小（934, 946, 1002, 1012行目）
+  - カウントダウン画面: 名前フォントサイズを`36 * screen_scale * 1.5`に拡大（954行目）
+  - リザルト画面: 勝利キャラY座標を280に変更（1271行目）
+  - リザルト画面: 敗北キャラY座標を310に変更（1331行目）
+  - リザルト画面: 王冠サイズを2倍に拡大（1300行目）
+
+#### ストーリーモードエンジン
+- `src/services/story_mode_engine.py`
+  - `datetime`モジュールのインポート追加（8行目）
+  - `start_battle`メソッド: `BattleEngine`作成後に`settings_manager.apply_to_battle_engine()`を呼び出し（83-88行目）
+  - `start_battle`メソッド: `Character.model_construct()`を使用してボスキャラクター作成（67-82行目）
+  - ボスの`luck`フィールドを含める修正
+
+### 技術的詳細
+
+#### 画面スケーリング計算
+```python
+# 基本解像度: 1920x1080
+screen_scale = min(screen_width / 1920, screen_height / 1080)
+circle_radius = int(base_circle_radius * screen_scale)
+name_font_size = int(36 * screen_scale * 1.5)
+```
+
+#### ボスキャラクター作成
+```python
+# 検証をバイパスしてボス（合計500）を作成
+boss_character = Character.model_construct(
+    id=f"boss_lv{boss_level}",
+    name=boss.name,
+    hp=boss.hp,
+    attack=boss.attack,
+    defense=boss.defense,
+    speed=boss.speed,
+    magic=boss.magic,
+    luck=boss.luck,
+    description=boss.description,
+    image_path=boss.image_path or "",
+    sprite_path=boss.sprite_path or "",
+    created_at=datetime.now(),
+    battle_count=0,
+    win_count=0
+)
+```
+
+### ユーザー影響
+- **視覚的改善**: 大画面でのバトル表示がより見やすく、迫力のある演出に
+- **バグ修正**: ストーリーモードでバトルスピード設定が反映されるように
+- **バグ修正**: ストーリーモードでボス（合計500）とのバトルが正常に動作
+
+---
+
 ## 2025-10-03 (修正55): Luckステータスの追加、全ステータス範囲の変更、ガードブレイク実装
 
 ### 変更内容
