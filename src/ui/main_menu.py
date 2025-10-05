@@ -1928,22 +1928,24 @@ class BattleHistoryWindow:
             except Exception as clear_e:
                 logger.warning(f"Error clearing tree: {clear_e}")
 
+            # Optimize: Load all characters once and cache them
+            character_cache = {}
+            try:
+                all_characters = self.db_manager.get_all_characters()
+                character_cache = {char.id: char.name for char in all_characters}
+                logger.info(f"Cached {len(character_cache)} character names for battle history")
+            except Exception as cache_e:
+                logger.warning(f"Error caching characters: {cache_e}")
+
             # Process battles with more conservative memory usage
             processed_count = 0
             for battle in battles:
                 if processed_count >= 50:  # Safety limit
                     break
                 try:
-                    # Get character names safely with simplified logic
-                    char1_name = "Unknown"
-                    char2_name = "Unknown"
-                    try:
-                        char1 = self.db_manager.get_character(battle.character1_id)
-                        char2 = self.db_manager.get_character(battle.character2_id)
-                        char1_name = char1.name if char1 else "Unknown"
-                        char2_name = char2.name if char2 else "Unknown"
-                    except Exception as char_e:
-                        logger.warning(f"Error getting character data: {char_e}")
+                    # Get character names from cache (much faster!)
+                    char1_name = character_cache.get(battle.character1_id, "Unknown")
+                    char2_name = character_cache.get(battle.character2_id, "Unknown")
 
                     # Determine winner name safely
                     winner_name = "Draw"  # Use English to avoid encoding issues
