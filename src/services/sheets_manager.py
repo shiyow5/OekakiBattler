@@ -563,18 +563,29 @@ class SheetsManager:
             # Fix ID integrity before processing
             self._fix_id_integrity()
 
+            # Force fresh data from spreadsheet (avoid cache issues during endless mode)
+            # Note: gspread caches worksheet data, so we need to refresh it
+            logger.debug("Fetching fresh data from spreadsheet...")
             all_records = self.worksheet.get_all_records()
+            logger.debug(f"Retrieved {len(all_records)} records from spreadsheet")
+
             characters = []
 
             # First pass: identify characters needing generation or sprite processing
             records_needing_generation = []
             records_needing_sprite = []
             for record in all_records:
+                hp_value = record.get('HP')
+                name_value = record.get('Name')
+
                 needs_generation = (
-                    record.get('HP') == 0 or
-                    record.get('HP') == '' or
-                    record.get('Name') == '' or
-                    not record.get('Name')
+                    hp_value == 0 or
+                    hp_value == '' or
+                    hp_value == '0' or  # Handle string "0" from GAS
+                    hp_value is None or
+                    name_value == '' or
+                    name_value is None or
+                    not name_value
                 )
                 if needs_generation:
                     records_needing_generation.append(record)
@@ -595,16 +606,27 @@ class SheetsManager:
             generation_count = 0
             sprite_count = 0
             for record in all_records:
+                # Check various conditions for needing generation
+                hp_value = record.get('HP')
+                name_value = record.get('Name')
+
+                # Debug: Log the actual values for troubleshooting
+                if hp_value in [0, '', '0', None] or name_value in ['', None]:
+                    logger.debug(f"Character ID {record.get('ID')}: HP={repr(hp_value)} (type: {type(hp_value).__name__}), Name={repr(name_value)}")
+
                 needs_generation = (
-                    record.get('HP') == 0 or
-                    record.get('HP') == '' or
-                    record.get('Name') == '' or
-                    not record.get('Name')
+                    hp_value == 0 or
+                    hp_value == '' or
+                    hp_value == '0' or  # Handle string "0" from GAS
+                    hp_value is None or
+                    name_value == '' or
+                    name_value is None or
+                    not name_value
                 )
 
                 if needs_generation:
                     generation_count += 1
-                    logger.info(f"Detected character with empty stats: ID {record.get('ID')}")
+                    logger.info(f"Detected character with empty stats: ID {record.get('ID')} (HP={repr(hp_value)}, Name={repr(name_value)})")
 
                     # Generate stats using AI with progress callback
                     generated_char = self._generate_stats_for_character(
@@ -614,7 +636,11 @@ class SheetsManager:
                         total=len(records_needing_generation)
                     )
                     if generated_char:
+                        logger.info(f"✓ Successfully generated character: {generated_char.name} (ID: {generated_char.id})")
                         characters.append(generated_char)
+                    else:
+                        logger.error(f"✗ Failed to generate character for ID {record.get('ID')} - skipping")
+                        # Skip this character - it will be retried on next get_all_characters() call
                 else:
                     # Check if sprite needs processing
                     image_url = str(record.get('Image URL', '')) if record.get('Image URL') else None
@@ -1035,26 +1061,54 @@ class SheetsManager:
             char_id = record.get('ID')
             image_url = str(record.get('Image URL', '')) if record.get('Image URL') else None
 
+            logger.info(f"Starting AI generation for character ID {char_id}")
+            logger.info(f"  Image URL: {image_url}")
+
             if not image_url:
                 logger.error(f"No image URL found for character {char_id}")
                 return None
 
             # Download image from URL to local cache
             local_path = Settings.CHARACTERS_DIR / f"char_{char_id}_original.png"
+            logger.info(f"  Local path: {local_path}")
+            logger.info(f"  File exists: {local_path.exists()}")
+
             if not local_path.exists():
                 logger.info(f"Downloading image from {image_url}")
                 if progress_callback:
                     progress_callback(current, total, None, "画像をダウンロード中...")
-                self.download_from_url(image_url, str(local_path))
+
+                download_success = self.download_from_url(image_url, str(local_path))
+                if download_success:
+                    logger.info(f"✓ Image downloaded successfully to {local_path}")
+                else:
+                    logger.error(f"✗ Failed to download image for character {char_id}")
+            else:
+                logger.info(f"Using existing local image: {local_path}")
 
             if not local_path.exists():
                 logger.error(f"Failed to download image for character {char_id}")
                 return None
 
+            # Use AI analyzer to generate stats BEFORE sprite processing
+            # (AI analysis needs the original image)
+            logger.info(f"Generating stats using AI for character {char_id}...")
+            if progress_callback:
+                progress_callback(current, total, None, "AIが画像を分析中...")
+
+            ai_analyzer = AIAnalyzer()
+            char_stats = ai_analyzer.analyze_character(str(local_path))
+
+            if not char_stats:
+                logger.error(f"✗ AI analysis failed for character {char_id}")
+                return None
+
+            logger.info(f"✓ AI analysis completed: {char_stats.name} (HP:{char_stats.hp}, ATK:{char_stats.attack}, DEF:{char_stats.defense}, SPD:{char_stats.speed}, MAG:{char_stats.magic}, LCK:{char_stats.luck})")
+
             # Process image to create sprite with transparency
             logger.info(f"Processing image to create sprite for character {char_id}...")
             if progress_callback:
-                progress_callback(current, total, None, "スプライトを作成中...")
+                progress_callback(current, total, char_stats.name, "スプライトを作成中...")
 
             from src.services.image_processor import ImageProcessor
             image_processor = ImageProcessor()
@@ -1075,7 +1129,7 @@ class SheetsManager:
                 # Upload sprite to Google Drive
                 logger.info(f"Uploading sprite to Google Drive for character {char_id}...")
                 if progress_callback:
-                    progress_callback(current, total, None, "スプライトをアップロード中...")
+                    progress_callback(current, total, char_stats.name, "スプライトをアップロード中...")
 
                 sprite_url = self.upload_to_drive(sprite_path, f"char_{char_id}_sprite.png")
                 if sprite_url:
@@ -1096,20 +1150,14 @@ class SheetsManager:
                 sprite_path = str(local_path)
                 sprite_url = image_url  # Use existing image URL
 
-            # Use AI analyzer to generate stats
-            logger.info(f"Generating stats using AI for character {char_id}...")
-            if progress_callback:
-                progress_callback(current, total, None, "AIが画像を分析中...")
-
-            ai_analyzer = AIAnalyzer()
-            char_stats = ai_analyzer.analyze_character(str(local_path))
-
-            if not char_stats:
-                logger.error(f"AI analysis failed for character {char_id}")
-                return None
-
             # Create a Character object from the CharacterStats
             from src.models.character import Character
+
+            # For battle display, we need local sprite path
+            # sprite_path should be the local file path, not the URL
+            # If sprite creation succeeded, sprite_path is already the local path
+            # If it failed, use local_path as fallback
+            final_sprite_path = sprite_path if sprite_path else str(local_path)
 
             analyzed_char = Character(
                 id=str(char_id),
@@ -1120,8 +1168,8 @@ class SheetsManager:
                 speed=char_stats.speed,
                 magic=char_stats.magic,
                 description=char_stats.description,
-                image_path=str(local_path),
-                sprite_path=sprite_path if sprite_path else str(local_path)
+                image_path=image_url,  # Use original image URL for reference
+                sprite_path=final_sprite_path  # Use local sprite path for battle display
             )
 
             # Update the spreadsheet with generated stats and sprite URL
@@ -1138,7 +1186,9 @@ class SheetsManager:
             return analyzed_char
 
         except Exception as e:
-            logger.error(f"Error generating stats for character: {e}")
+            logger.error(f"✗ Error generating stats for character ID {record.get('ID')}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
 
     def _update_character_stats_in_sheet(self, char_id: int, character: Character, sprite_url: str = None) -> bool:

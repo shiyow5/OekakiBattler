@@ -50,6 +50,12 @@ class Settings:
     SCREEN_WIDTH = 1024
     SCREEN_HEIGHT = 768
     FPS = 60
+    # Battle display monitor index (0-based)
+    # - 0 = Primary monitor (first display)
+    # - 1 = Secondary monitor (second display) ← Default
+    # - 2 = Tertiary monitor (third display)
+    # Note: Display indices are 0-based. For 2 monitors, valid indices are 0 and 1.
+    BATTLE_DISPLAY_INDEX = int(os.getenv("BATTLE_DISPLAY_INDEX", "1"))
     
     # Audio Settings
     ENABLE_SOUND = True

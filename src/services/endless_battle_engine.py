@@ -154,24 +154,51 @@ class EndlessBattleEngine:
             self.participants = []
 
     def _check_for_new_characters(self):
-        """Check for newly added characters and add them to participants"""
+        """Check for newly added characters and add them to participants
+
+        This method will also trigger AI generation for characters with empty stats
+        when get_all_characters() is called. Characters with HP > 0 are valid for battle.
+        """
         try:
+            logger.debug("Checking for new characters...")
+
+            # This call will automatically generate stats for empty characters (HP=0)
+            # The get_all_characters() method handles AI generation internally
             all_characters = self.db_manager.get_all_characters()
+
+            # Filter out characters with invalid stats (HP <= 0)
+            # These are characters that failed AI generation or are still being processed
             new_characters = [
                 c for c in all_characters
                 if c.id not in self.known_character_ids and c.hp > 0
             ]
 
             if new_characters:
-                logger.info(f"Found {len(new_characters)} new character(s)")
+                logger.info(f"✓ Found {len(new_characters)} new character(s) ready for battle")
                 self.participants.extend(new_characters)
                 self.known_character_ids.update(c.id for c in new_characters)
 
                 for char in new_characters:
-                    logger.info(f"New challenger joins: {char.name}")
+                    logger.info(f"  → New challenger joins: {char.name} (HP: {char.hp}, ATK: {char.attack})")
+
+            # Check if there are characters with HP=0 (failed or still processing)
+            pending_characters = [
+                c for c in all_characters
+                if c.id not in self.known_character_ids and c.hp <= 0
+            ]
+
+            if pending_characters:
+                logger.warning(f"Found {len(pending_characters)} character(s) with invalid stats")
+                for char in pending_characters:
+                    logger.warning(f"  ✗ Character ID {char.id} has HP={char.hp} (AI generation may have failed)")
+                    # Add to known_character_ids to avoid repeatedly processing failed characters
+                    self.known_character_ids.add(char.id)
+                    logger.info(f"  → Marked character ID {char.id} as known (will not retry AI generation this session)")
 
         except Exception as e:
             logger.error(f"Error checking for new characters: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def stop(self):
         """Stop endless battle mode"""

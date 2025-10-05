@@ -7,6 +7,7 @@ import time
 import logging
 import pygame
 import math
+import os
 from pathlib import Path
 from typing import Tuple, List, Optional
 from src.models import Character, Battle, BattleTurn, BattleResult
@@ -46,27 +47,89 @@ class BattleEngine:
     def initialize_display(self) -> bool:
         """Initialize Pygame display for battle visualization"""
         try:
-            # Clean up any existing display first
+            # Detect monitors BEFORE any pygame display operations
+            # and set environment variable for window positioning
+            try:
+                # Initialize Pygame if not already done (needed for display detection)
+                if not pygame.get_init():
+                    logger.warning("Pygame not initialized on main thread - attempting initialization")
+                    pygame.init()
+                    self.pygame_initialized = True
+                    logger.info("Pygame initialized (fallback)")
+
+                num_displays = pygame.display.get_num_displays()
+                logger.info(f"Detected {num_displays} display(s)")
+
+                if num_displays > 1:
+                    # Get desktop info for all displays
+                    desktop_sizes = pygame.display.get_desktop_sizes()
+                    logger.info(f"Display sizes: {desktop_sizes}")
+
+                    # Position window on second monitor (index 1)
+                    # Calculate x position: primary monitor width
+                    primary_width = desktop_sizes[0][0]
+
+                    # Set SDL environment variable to position window on secondary monitor
+                    # This MUST be set BEFORE any display.quit() or display.set_mode() calls
+                    os.environ['SDL_VIDEO_WINDOW_POS'] = f"{primary_width},0"
+                    logger.info(f"✓ Will position battle window on secondary monitor at x={primary_width}")
+                else:
+                    logger.info("Single display detected, using primary monitor")
+            except Exception as e:
+                logger.warning(f"Could not detect multiple displays: {e}")
+                logger.info("Falling back to primary monitor")
+
+            # Clean up any existing display AFTER setting environment variable
             if self.screen is not None:
                 try:
                     pygame.display.quit()
                     self.screen = None
                 except:
                     pass
-            
-            # Initialize Pygame if not already done
-            # Note: pygame.init() should be called on main thread (done in main.py for macOS 15+)
-            if not pygame.get_init():
-                logger.warning("Pygame not initialized on main thread - attempting initialization")
-                pygame.init()
-                self.pygame_initialized = True
-                logger.info("Pygame initialized (fallback)")
-            
+
+            # Re-initialize Pygame display subsystem if we just quit it
+            if not pygame.display.get_init():
+                pygame.display.init()
+
             # Initialize audio and load default sounds
             audio_manager.create_default_sounds()
 
             # Create new display in fullscreen mode
-            self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            # Try to use display parameter for pygame 2.0+ to specify monitor
+            try:
+                # Check if we have multiple displays and can use display parameter
+                num_displays = pygame.display.get_num_displays()
+                logger.info(f"Available displays: {num_displays}")
+
+                # Determine which display to use
+                target_display = 0  # Default to primary
+
+                if num_displays > 1:
+                    # Use configured display index from settings
+                    target_display = Settings.BATTLE_DISPLAY_INDEX
+
+                    # Validate the display index (indices are 0-based)
+                    if target_display >= num_displays:
+                        logger.warning(f"Configured BATTLE_DISPLAY_INDEX={target_display} is out of range")
+                        logger.warning(f"  Available displays: {num_displays} (indices 0-{num_displays-1})")
+                        logger.warning(f"  → Using secondary monitor (display {num_displays - 1})")
+                        target_display = num_displays - 1
+
+                    display_label = "primary" if target_display == 0 else f"secondary (display {target_display})"
+                    logger.info(f"Attempting to create fullscreen on {display_label}")
+                    self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN, display=target_display)
+                    logger.info(f"✓ Successfully created display on monitor {target_display} ({display_label})")
+                else:
+                    logger.info("Single display detected, using display 0")
+                    self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            except TypeError:
+                # Fallback for older pygame versions that don't support display parameter
+                logger.warning("Pygame version doesn't support display parameter, using SDL_VIDEO_WINDOW_POS")
+                self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            except Exception as e:
+                logger.warning(f"Failed to set display on monitor {target_display}: {e}")
+                logger.warning("Trying fallback to display 0")
+                self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
 
             # Get actual fullscreen size
             self.screen_width = self.screen.get_width()
@@ -1143,10 +1206,22 @@ class BattleEngine:
             # Try to load sprite image (background removed) first, fallback to original image
             image_path = character.sprite_path or character.image_path
             if image_path:
+                # Check if it's a URL (http:// or https://)
+                if image_path.startswith('http://') or image_path.startswith('https://'):
+                    # URL detected - try to find local cached sprite instead
+                    sprite_cache_path = Settings.SPRITES_DIR / f"char_{character.id}_sprite.png"
+                    if sprite_cache_path.exists():
+                        logger.info(f"Using cached sprite for character {character.name}: {sprite_cache_path}")
+                        image_path = str(sprite_cache_path)
+                    else:
+                        logger.warning(f"Character {character.name} has URL path but no local sprite cache found")
+                        logger.warning(f"  URL: {image_path}")
+                        logger.warning(f"  Expected cache: {sprite_cache_path}")
+                        return None
                 # If it's a relative path, make it relative to the project root
-                if not Path(image_path).is_absolute():
+                elif not Path(image_path).is_absolute():
                     image_path = str(Path.cwd() / image_path)
-                
+
                 if Path(image_path).exists():
                     try:
                         sprite = pygame.image.load(image_path)
