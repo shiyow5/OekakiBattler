@@ -6,7 +6,7 @@
   "screen_height": 768,
   "fps": 60,
   "master_volume": 0.7,
-  "bgm_volume": 0.3,
+  "bgm_volume": 0.25,
   "sfx_volume": 0.8,
   "enable_sound": true,
   "auto_save_battles": true,

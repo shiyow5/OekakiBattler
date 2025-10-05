@@ -822,10 +822,17 @@ class BattleEngine:
             if self.effects:
                 self.effects.draw()
 
-            # Draw damage text
-            if current_turn and not current_turn.is_miss and current_turn.damage > 0:
+            # Draw action text (on attacker) and damage text (on defender)
+            if current_turn:
+                attacker_pos = char1_pos if current_turn.attacker_id == char1.id else char2_pos
                 defender_pos = char2_pos if current_turn.attacker_id == char1.id else char1_pos
-                self._draw_damage_text(current_turn, defender_pos, scale)
+
+                # Draw action text above attacker
+                self._draw_action_text(current_turn, attacker_pos, scale)
+
+                # Draw damage text on defender (only if hit and damage > 0)
+                if not current_turn.is_miss and current_turn.damage > 0:
+                    self._draw_damage_text(current_turn, defender_pos, scale)
 
             # Draw recent battle log (moved down to fit taller arena)
             if recent_logs:
@@ -844,40 +851,66 @@ class BattleEngine:
     def _draw_hp_bars(self, char1: Character, char2: Character, char1_pos: Tuple[int, int], char2_pos: Tuple[int, int], char1_hp: int, char2_hp: int, shake_offset: List[int], scale: float = 1.0):
         """Draw HP bars for both characters"""
         try:
-            # Larger HP bars to match bigger characters
-            hp_bar_width = int(250 * scale)  # Increased to 250 for even longer bar
-            hp_bar_height = int(25 * scale)  # Increased from 20 to 25
-            hp_bar_offset_x = int(125 * scale)  # Increased to 125 to center the longer bar
-            hp_bar_offset_y = int(180 * scale)  # Increased from 80 to 180 for bigger characters
+            # HP bar dimensions
+            hp_bar_width = int(280 * scale)  # Increased to 280 to accommodate larger text
+            hp_bar_height = int(30 * scale)  # Increased from 25 to 30 for better visibility
+            hp_bar_offset_x = int(140 * scale)  # Increased to 140 to center the longer bar
+            hp_bar_offset_y = int(185 * scale)  # Adjusted for better spacing
 
             # Calculate HP ratios
             char1_hp_ratio = max(0, char1_hp / char1.hp)
             char2_hp_ratio = max(0, char2_hp / char2.hp)
+
+            # Determine HP bar colors based on health percentage
+            def get_hp_color(hp_ratio):
+                if hp_ratio > 0.5:
+                    return (0, 255, 0)  # Green
+                elif hp_ratio > 0.25:
+                    return (255, 255, 0)  # Yellow
+                else:
+                    return (255, 0, 0)  # Red
 
             # Character 1 HP bar
             hp1_bar_rect = pygame.Rect(char1_pos[0] - hp_bar_offset_x, char1_pos[1] - hp_bar_offset_y, hp_bar_width, hp_bar_height)
             hp1_fill_width = int(hp_bar_width * char1_hp_ratio)
             hp1_fill_rect = pygame.Rect(char1_pos[0] - hp_bar_offset_x, char1_pos[1] - hp_bar_offset_y, hp1_fill_width, hp_bar_height)
 
-            pygame.draw.rect(self.screen, (255, 255, 255), hp1_bar_rect)
-            pygame.draw.rect(self.screen, (0, 255, 0), hp1_fill_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, max(1, int(3 * scale)))  # Thicker border
+            pygame.draw.rect(self.screen, (80, 80, 80), hp1_bar_rect)  # Dark gray background
+            pygame.draw.rect(self.screen, get_hp_color(char1_hp_ratio), hp1_fill_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, max(1, int(3 * scale)))  # Black border
 
             # Character 2 HP bar
             hp2_bar_rect = pygame.Rect(char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_bar_offset_y, hp_bar_width, hp_bar_height)
             hp2_fill_width = int(hp_bar_width * char2_hp_ratio)
             hp2_fill_rect = pygame.Rect(char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_bar_offset_y, hp2_fill_width, hp_bar_height)
 
-            pygame.draw.rect(self.screen, (255, 255, 255), hp2_bar_rect)
-            pygame.draw.rect(self.screen, (0, 255, 0), hp2_fill_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, max(1, int(3 * scale)))  # Thicker border
+            pygame.draw.rect(self.screen, (80, 80, 80), hp2_bar_rect)  # Dark gray background
+            pygame.draw.rect(self.screen, get_hp_color(char2_hp_ratio), hp2_fill_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, max(1, int(3 * scale)))  # Black border
 
-            # Draw HP text (using regular font for larger display)
+            # Draw HP text with scaled font size
+            hp_font_size = int(36 * scale)  # Base size 36, scaled to screen
+            hp_font = self._create_font(hp_font_size)
+
             hp1_text = f"HP: {char1_hp}/{char1.hp}"
             hp2_text = f"HP: {char2_hp}/{char2.hp}"
-            hp1_surface = self.font.render(hp1_text, True, (0, 0, 0))
-            hp2_surface = self.font.render(hp2_text, True, (0, 0, 0))
-            hp_text_offset_y = int(215 * scale)  # Increased from 205 to 215 to avoid overlap
+            hp1_surface = hp_font.render(hp1_text, True, (255, 255, 255))  # White text for better contrast
+            hp2_surface = hp_font.render(hp2_text, True, (255, 255, 255))  # White text for better contrast
+
+            # Position text above HP bar with more spacing
+            hp_text_offset_y = int(225 * scale)  # Increased from 215 to 225 for more space
+
+            # Draw text with black outline for better visibility
+            outline_offset = max(1, int(2 * scale))
+            for dx in [-outline_offset, 0, outline_offset]:
+                for dy in [-outline_offset, 0, outline_offset]:
+                    if dx != 0 or dy != 0:
+                        outline1 = hp_font.render(hp1_text, True, (0, 0, 0))
+                        outline2 = hp_font.render(hp2_text, True, (0, 0, 0))
+                        self.screen.blit(outline1, (char1_pos[0] - hp_bar_offset_x + dx, char1_pos[1] - hp_text_offset_y + dy))
+                        self.screen.blit(outline2, (char2_pos[0] - hp_bar_offset_x + dx, char2_pos[1] - hp_text_offset_y + dy))
+
+            # Draw main text
             self.screen.blit(hp1_surface, (char1_pos[0] - hp_bar_offset_x, char1_pos[1] - hp_text_offset_y))
             self.screen.blit(hp2_surface, (char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_text_offset_y))
 
@@ -947,7 +980,77 @@ class BattleEngine:
 
         except Exception as e:
             logger.error(f"Error drawing damage text: {e}")
-    
+
+    def _draw_action_text(self, turn: BattleTurn, position: Tuple[int, int], display_scale: float = 1.0):
+        """Draw action text above attacker (攻撃！, クリティカル！, etc.)"""
+        try:
+            # Determine action text and color based on turn type
+            if turn.is_miss:
+                action_text = "ミス！"
+                action_color = (128, 128, 128)  # Gray
+                font_size = int(48 * display_scale)
+            elif turn.is_guard_break and turn.is_critical:
+                action_text = "ガードブレイク！\nクリティカル！"
+                action_color = (255, 100, 255)  # Magenta (both effects)
+                font_size = int(52 * display_scale)
+            elif turn.is_guard_break:
+                action_text = "ガードブレイク！"
+                action_color = (100, 150, 255)  # Blue
+                font_size = int(52 * display_scale)
+            elif turn.is_critical:
+                action_text = "クリティカル！"
+                action_color = (255, 215, 0)  # Gold
+                font_size = int(56 * display_scale)
+            elif turn.action_type == "magic":
+                action_text = "魔法攻撃！"
+                action_color = (138, 43, 226)  # Purple
+                font_size = int(52 * display_scale)
+            else:  # Normal attack
+                action_text = "攻撃！"
+                action_color = (255, 140, 0)  # Orange
+                font_size = int(48 * display_scale)
+
+            # Create font for action text
+            action_font = self._create_font(font_size)
+
+            # Handle multi-line text (for guard break + critical)
+            lines = action_text.split('\n')
+            total_height = 0
+            surfaces = []
+
+            for line in lines:
+                surface = action_font.render(line, True, action_color)
+                surfaces.append(surface)
+                total_height += surface.get_height()
+
+            # Add floating animation
+            float_offset = int(15 * display_scale * math.sin(pygame.time.get_ticks() * 0.01))
+            base_y = position[1] - int(220 * display_scale) - float_offset
+
+            # Draw each line with outline
+            current_y = base_y - total_height // 2
+            for surface in surfaces:
+                text_pos = (position[0] - surface.get_width() // 2, current_y)
+
+                # Draw outline for better visibility
+                try:
+                    outline_surface = action_font.render(surface.get_at((0, 0)) and action_text or lines[surfaces.index(surface)], True, (0, 0, 0))
+                    outline_offset = int(2 * display_scale)
+                    for dx in [-outline_offset, 0, outline_offset]:
+                        for dy in [-outline_offset, 0, outline_offset]:
+                            if dx != 0 or dy != 0:
+                                # Re-render the line for outline
+                                outline = action_font.render(lines[surfaces.index(surface)], True, (0, 0, 0))
+                                self.screen.blit(outline, (text_pos[0] + dx, text_pos[1] + dy))
+                except:
+                    pass  # Skip outline if it fails
+
+                self.screen.blit(surface, text_pos)
+                current_y += surface.get_height()
+
+        except Exception as e:
+            logger.error(f"Error drawing action text: {e}")
+
     def _show_battle_start_screen(self, char1: Character, char2: Character):
         """Show battle start screen with VS display and countdown"""
         if not self.screen:
