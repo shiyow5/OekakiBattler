@@ -40,6 +40,16 @@ class BattleEngine:
         self.battle_sprites = {}
         self.background_image = None  # Battle arena background image
 
+        # Performance optimization: Pre-calculated values
+        self.screen_scale_x = 1.0
+        self.screen_scale_y = 1.0
+        self.screen_scale = 1.0
+        self.char1_base_pos = (250, 350)
+        self.char2_base_pos = (774, 350)
+
+        # Font cache for performance
+        self._font_cache = {}
+
         # Effect systems
         self.effects = None
         self.animator = None
@@ -223,7 +233,16 @@ class BattleEngine:
             # Load background image
             self._load_background_image()
 
-            logger.info("Battle display initialized successfully")
+            # Performance optimization: Pre-calculate scale values for rendering
+            self.screen_scale_x = self.screen_width / 1024
+            self.screen_scale_y = self.screen_height / 768
+            self.screen_scale = min(self.screen_scale_x, self.screen_scale_y)
+
+            # Pre-calculate character base positions
+            self.char1_base_pos = (int(250 * self.screen_scale_x), int(350 * self.screen_scale_y))
+            self.char2_base_pos = (int((self.screen_width - 250 * self.screen_scale_x)), int(350 * self.screen_scale_y))
+
+            logger.info(f"Battle display initialized successfully (scale: {self.screen_scale:.2f}x)")
             return True
         except Exception as e:
             logger.error(f"Failed to initialize battle display: {e}")
@@ -746,12 +765,12 @@ class BattleEngine:
             return
 
         try:
-            # Get actual screen size and calculate scale
-            screen_width = self.screen.get_width()
-            screen_height = self.screen.get_height()
-            scale_x = screen_width / 1024
-            scale_y = screen_height / 768
-            scale = min(scale_x, scale_y)
+            # Use pre-calculated scale values for performance
+            screen_width = self.screen_width
+            screen_height = self.screen_height
+            scale_x = self.screen_scale_x
+            scale_y = self.screen_scale_y
+            scale = self.screen_scale
 
             # Update effect systems
             if self.effects:
@@ -783,20 +802,17 @@ class BattleEngine:
             # Draw arena border
             pygame.draw.rect(self.screen, (100, 100, 100), arena_rect, int(3 * scale))
 
-            # Character positions with animation offsets (adjusted for taller arena)
-            char1_base_pos = (int(250 * scale_x), int(350 * scale_y))
-            char2_base_pos = (int((screen_width - 250 * scale_x)), int(350 * scale_y))
-
+            # Character positions with animation offsets (using pre-calculated base positions)
             char1_offset = self.animator.get_offset(char1.id) if self.animator else (0, 0)
             char2_offset = self.animator.get_offset(char2.id) if self.animator else (0, 0)
 
             char1_pos = (
-                char1_base_pos[0] + int(char1_offset[0]) + shake_offset[0],
-                char1_base_pos[1] + int(char1_offset[1]) + shake_offset[1]
+                self.char1_base_pos[0] + int(char1_offset[0]) + shake_offset[0],
+                self.char1_base_pos[1] + int(char1_offset[1]) + shake_offset[1]
             )
             char2_pos = (
-                char2_base_pos[0] + int(char2_offset[0]) + shake_offset[0],
-                char2_base_pos[1] + int(char2_offset[1]) + shake_offset[1]
+                self.char2_base_pos[0] + int(char2_offset[0]) + shake_offset[0],
+                self.char2_base_pos[1] + int(char2_offset[1]) + shake_offset[1]
             )
 
             # Draw characters (pass scale for proper sizing)
@@ -1349,13 +1365,21 @@ class BattleEngine:
             return None
 
     def _create_font(self, size: int) -> pygame.font.Font:
-        """Create a font with Japanese support at the specified size"""
+        """Create a font with Japanese support at the specified size (with caching for performance)"""
+        # Check cache first
+        if size in self._font_cache:
+            return self._font_cache[size]
+
         try:
             if self.japanese_font_path:
-                return pygame.font.Font(self.japanese_font_path, size)
+                font = pygame.font.Font(self.japanese_font_path, size)
             else:
                 # Fallback to default font if no Japanese font available
-                return pygame.font.Font(None, size)
+                font = pygame.font.Font(None, size)
+
+            # Cache the font for future use
+            self._font_cache[size] = font
+            return font
         except Exception as e:
             logger.warning(f"Failed to create font with size {size}: {e}")
             return self.font  # Return the default font as fallback

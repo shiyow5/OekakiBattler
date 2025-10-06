@@ -1814,7 +1814,10 @@ class BattleHistoryWindow:
         # Battle list with scrollbar
         list_frame = ttk.Frame(main_frame)
         list_frame.pack(fill=tk.BOTH, expand=True)
-        
+
+        # Initialize fallback flag BEFORE creating widgets
+        self._use_listbox_fallback = False
+
         # Safer Treeview initialization to prevent segfault
         try:
             # Use more basic column configuration to avoid memory issues
@@ -1861,9 +1864,6 @@ class BattleHistoryWindow:
             # Fallback: create minimal listbox if Treeview fails
             self.tree = tk.Listbox(list_frame, height=15)
             self._use_listbox_fallback = True
-        
-        # Initialize fallback flag
-        self._use_listbox_fallback = getattr(self, '_use_listbox_fallback', False)
 
         # Scrollbars with error handling
         try:

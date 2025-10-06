@@ -2116,7 +2116,7 @@ class SheetsManager:
             logger.error(traceback.format_exc())
 
     def _update_battle_history_ids(self, id_mapping: dict):
-        """Update character IDs in BattleHistory sheet"""
+        """Update character IDs in BattleHistory sheet (optimized with batch update)"""
         try:
             if not hasattr(self, 'battle_history_sheet') or self.battle_history_sheet is None:
                 return
@@ -2130,20 +2130,24 @@ class SheetsManager:
             # Columns: Battle ID, Date, Fighter 1 ID, Fighter 1 Name, Fighter 2 ID, ...
             # Fighter 1 ID is column C (index 2), Fighter 2 ID is column E (index 4)
             # Winner ID is column F (index 5)
-            updates_needed = False
+
+            # Collect all updates for batch processing
+            updated_rows = []
 
             for row_idx in range(1, len(all_values)):  # Skip header
-                row = all_values[row_idx]
+                row = list(all_values[row_idx])  # Convert to list for modification
                 if len(row) < 6:
                     continue
+
+                row_updated = False
 
                 # Update Fighter 1 ID (column C, index 2)
                 if len(row) > 2 and row[2]:
                     try:
                         old_id = int(row[2])
                         if old_id in id_mapping:
-                            self.battle_history_sheet.update_cell(row_idx + 1, 3, id_mapping[old_id])
-                            updates_needed = True
+                            row[2] = id_mapping[old_id]
+                            row_updated = True
                     except (ValueError, TypeError):
                         pass
 
@@ -2152,8 +2156,8 @@ class SheetsManager:
                     try:
                         old_id = int(row[4])
                         if old_id in id_mapping:
-                            self.battle_history_sheet.update_cell(row_idx + 1, 5, id_mapping[old_id])
-                            updates_needed = True
+                            row[4] = id_mapping[old_id]
+                            row_updated = True
                     except (ValueError, TypeError):
                         pass
 
@@ -2162,19 +2166,27 @@ class SheetsManager:
                     try:
                         old_id = int(row[5])
                         if old_id in id_mapping:
-                            self.battle_history_sheet.update_cell(row_idx + 1, 6, id_mapping[old_id])
-                            updates_needed = True
+                            row[5] = id_mapping[old_id]
+                            row_updated = True
                     except (ValueError, TypeError):
                         pass
 
-            if updates_needed:
-                logger.info("✓ Updated BattleHistory sheet IDs")
+                if row_updated:
+                    updated_rows.append(row)
+                else:
+                    updated_rows.append(list(all_values[row_idx]))  # Keep original
+
+            # Batch update all rows at once (1 API call instead of N)
+            if any(updated_rows[i] != list(all_values[i + 1]) for i in range(len(updated_rows))):
+                cell_range = f'A2:P{len(updated_rows) + 1}'  # P covers all 15 columns
+                self.battle_history_sheet.update(cell_range, updated_rows, value_input_option='USER_ENTERED')
+                logger.info(f"✓ Updated BattleHistory sheet IDs (batch update: {len(updated_rows)} rows)")
 
         except Exception as e:
             logger.error(f"Error updating BattleHistory IDs: {e}")
 
     def _update_rankings_ids(self, id_mapping: dict):
-        """Update character IDs in Rankings sheet"""
+        """Update character IDs in Rankings sheet (optimized with batch update)"""
         try:
             if not hasattr(self, 'ranking_sheet') or self.ranking_sheet is None:
                 return
@@ -2187,10 +2199,12 @@ class SheetsManager:
 
             # Columns: Rank, Character ID, Character Name, ...
             # Character ID is column B (index 1)
-            updates_needed = False
+
+            # Collect all updates for batch processing
+            updated_rows = []
 
             for row_idx in range(1, len(all_values)):  # Skip header
-                row = all_values[row_idx]
+                row = list(all_values[row_idx])  # Convert to list for modification
                 if len(row) < 2:
                     continue
 
@@ -2199,19 +2213,23 @@ class SheetsManager:
                     try:
                         old_id = int(row[1])
                         if old_id in id_mapping:
-                            self.ranking_sheet.update_cell(row_idx + 1, 2, id_mapping[old_id])
-                            updates_needed = True
+                            row[1] = id_mapping[old_id]
                     except (ValueError, TypeError):
                         pass
 
-            if updates_needed:
-                logger.info("✓ Updated Rankings sheet IDs")
+                updated_rows.append(row)
+
+            # Batch update all rows at once (1 API call instead of N)
+            if any(updated_rows[i] != list(all_values[i + 1]) for i in range(len(updated_rows))):
+                cell_range = f'A2:J{len(updated_rows) + 1}'  # J covers all 10 columns
+                self.ranking_sheet.update(cell_range, updated_rows, value_input_option='USER_ENTERED')
+                logger.info(f"✓ Updated Rankings sheet IDs (batch update: {len(updated_rows)} rows)")
 
         except Exception as e:
             logger.error(f"Error updating Rankings IDs: {e}")
 
     def _update_story_progress_ids(self, id_mapping: dict):
-        """Update character IDs in StoryProgress sheet"""
+        """Update character IDs in StoryProgress sheet (optimized with batch update)"""
         try:
             if not hasattr(self, 'story_progress_sheet') or self.story_progress_sheet is None:
                 return
@@ -2224,10 +2242,12 @@ class SheetsManager:
 
             # Columns: Character ID, Current Level, ...
             # Character ID is column A (index 0)
-            updates_needed = False
+
+            # Collect all updates for batch processing
+            updated_rows = []
 
             for row_idx in range(1, len(all_values)):  # Skip header
-                row = all_values[row_idx]
+                row = list(all_values[row_idx])  # Convert to list for modification
                 if len(row) < 1:
                     continue
 
@@ -2236,13 +2256,17 @@ class SheetsManager:
                     try:
                         old_id = int(row[0])
                         if old_id in id_mapping:
-                            self.story_progress_sheet.update_cell(row_idx + 1, 1, id_mapping[old_id])
-                            updates_needed = True
+                            row[0] = id_mapping[old_id]
                     except (ValueError, TypeError):
                         pass
 
-            if updates_needed:
-                logger.info("✓ Updated StoryProgress sheet IDs")
+                updated_rows.append(row)
+
+            # Batch update all rows at once (1 API call instead of N)
+            if any(updated_rows[i] != list(all_values[i + 1]) for i in range(len(updated_rows))):
+                cell_range = f'A2:F{len(updated_rows) + 1}'  # F covers all 6 columns
+                self.story_progress_sheet.update(cell_range, updated_rows, value_input_option='USER_ENTERED')
+                logger.info(f"✓ Updated StoryProgress sheet IDs (batch update: {len(updated_rows)} rows)")
 
         except Exception as e:
             logger.error(f"Error updating StoryProgress IDs: {e}")
