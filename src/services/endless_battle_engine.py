@@ -25,6 +25,7 @@ class EndlessBattleEngine:
         self.battle_count = 0
         self.champion_wins = 0
         self.known_character_ids = set()
+        self.endless_access_granted_ids = set()  # Track characters who have been granted endless access
 
     def start_endless_battle(self, visual_mode: bool = False):
         """
@@ -88,6 +89,19 @@ class EndlessBattleEngine:
         challenger = random.choice(self.participants)
         self.participants.remove(challenger)
 
+        # Safety check: ensure champion and challenger are different
+        if challenger.id == self.current_champion.id:
+            logger.error(f"ERROR: Same character selected for battle! {challenger.name} (ID: {challenger.id})")
+            logger.error(f"Champion ID: {self.current_champion.id}, Challenger ID: {challenger.id}")
+            logger.error("Re-adding challenger to participants and waiting...")
+            self.participants.append(challenger)
+            return {
+                'status': 'waiting',
+                'champion': self.current_champion,
+                'champion_wins': self.champion_wins,
+                'message': 'エラー検出: 同じキャラクターが選択されました。再試行します...'
+            }
+
         # Store battle participants (before champion might change)
         fighter1 = self.current_champion
         fighter2 = challenger
@@ -143,12 +157,26 @@ class EndlessBattleEngine:
         }
 
     def _load_characters(self):
-        """Load all characters from database"""
+        """Load all characters from database (only those with endless access)"""
         try:
             all_characters = self.db_manager.get_all_characters()
-            self.participants = [c for c in all_characters if c.hp > 0]
+
+            # Filter: only characters with HP > 0 AND endless_access = True (via StoryProgress)
+            eligible_characters = []
+            for char in all_characters:
+                if char.hp <= 0:
+                    continue
+
+                # Check endless access via StoryProgress
+                progress = self.db_manager.get_story_progress(char.id)
+                if progress and progress.endless_access:
+                    eligible_characters.append(char)
+
+            self.participants = eligible_characters
             self.known_character_ids = {c.id for c in all_characters}
-            logger.info(f"Loaded {len(self.participants)} characters")
+            # Track which characters have endless access
+            self.endless_access_granted_ids = {c.id for c in eligible_characters}
+            logger.info(f"Loaded {len(self.participants)} characters with endless access")
         except Exception as e:
             logger.error(f"Error loading characters: {e}")
             self.participants = []
@@ -157,29 +185,84 @@ class EndlessBattleEngine:
         """Check for newly added characters and add them to participants
 
         This method will also trigger AI generation for characters with empty stats
-        when get_all_characters() is called. Characters with HP > 0 are valid for battle.
+        when get_all_characters() is called. Only characters with endless_access = True
+        (via StoryProgress) are eligible for endless battle.
         """
         try:
-            logger.debug("Checking for new characters...")
+            logger.debug("Checking for new characters with endless access...")
 
             # This call will automatically generate stats for empty characters (HP=0)
             # The get_all_characters() method handles AI generation internally
             all_characters = self.db_manager.get_all_characters()
 
-            # Filter out characters with invalid stats (HP <= 0)
-            # These are characters that failed AI generation or are still being processed
-            new_characters = [
-                c for c in all_characters
-                if c.id not in self.known_character_ids and c.hp > 0
-            ]
+            # Filter: new characters with HP > 0 AND endless_access = True (via StoryProgress)
+            new_characters = []
+            no_access_characters = []
+            newly_granted_access = []
 
+            for char in all_characters:
+                if char.hp <= 0:
+                    continue
+
+                # Check endless access via StoryProgress
+                progress = self.db_manager.get_story_progress(char.id)
+
+                # Character already known
+                if char.id in self.known_character_ids:
+                    # Check if this is a character that previously didn't have access but now does
+                    if progress and progress.endless_access:
+                        # Only add if we haven't already tracked this endless access grant
+                        if char.id not in self.endless_access_granted_ids:
+                            newly_granted_access.append(char)
+                    continue
+
+                # New character
+                if progress and progress.endless_access:
+                    new_characters.append(char)
+                else:
+                    no_access_characters.append(char)
+
+            # Handle newly granted access (existing characters who completed story mode)
+            if newly_granted_access:
+                # Exclude current champion and already participating characters
+                participant_ids = {c.id for c in self.participants}
+                newly_granted_access = [c for c in newly_granted_access
+                                       if c.id != self.current_champion.id
+                                       and c.id not in participant_ids]
+
+                if newly_granted_access:
+                    logger.info(f"✓ Found {len(newly_granted_access)} existing character(s) who gained endless access")
+                    self.participants.extend(newly_granted_access)
+                    # Mark these characters as having endless access granted
+                    self.endless_access_granted_ids.update(c.id for c in newly_granted_access)
+                    for char in newly_granted_access:
+                        logger.info(f"  → Challenger joins after completing story mode: {char.name} (HP: {char.hp}, ATK: {char.attack})")
+
+            # Handle completely new characters
             if new_characters:
-                logger.info(f"✓ Found {len(new_characters)} new character(s) ready for battle")
-                self.participants.extend(new_characters)
-                self.known_character_ids.update(c.id for c in new_characters)
+                # Exclude current champion and already participating characters
+                participant_ids = {c.id for c in self.participants}
+                new_characters = [c for c in new_characters
+                                 if c.id != self.current_champion.id
+                                 and c.id not in participant_ids]
 
-                for char in new_characters:
-                    logger.info(f"  → New challenger joins: {char.name} (HP: {char.hp}, ATK: {char.attack})")
+                if new_characters:
+                    logger.info(f"✓ Found {len(new_characters)} new character(s) with endless access ready for battle")
+                    self.participants.extend(new_characters)
+                    self.known_character_ids.update(c.id for c in new_characters)
+                    # Mark these characters as having endless access granted
+                    self.endless_access_granted_ids.update(c.id for c in new_characters)
+
+                    for char in new_characters:
+                        logger.info(f"  → New challenger joins: {char.name} (HP: {char.hp}, ATK: {char.attack})")
+
+            # Check if there are characters without endless access
+            if no_access_characters:
+                logger.info(f"Found {len(no_access_characters)} character(s) without endless access (still in story mode)")
+                for char in no_access_characters:
+                    logger.info(f"  ⏳ {char.name} (ID: {char.id}) needs to complete story mode")
+                    # Add to known_character_ids to avoid repeatedly logging
+                    self.known_character_ids.add(char.id)
 
             # Check if there are characters with HP=0 (failed or still processing)
             pending_characters = [

@@ -32,6 +32,8 @@ class SheetsManager:
         self.worksheet = None
         self.battle_history_sheet = None
         self.ranking_sheet = None
+        self.last_id_integrity_check = 0  # Timestamp of last ID integrity check
+        self.id_integrity_check_interval = 300  # Check every 5 minutes (300 seconds)
         self.drive_service = None
         self.credentials = None
         self.online_mode = False  # Track if connected to Google Sheets/Drive
@@ -104,6 +106,10 @@ class SheetsManager:
                 logger.info(f"Created new worksheet: {Settings.RANKING_SHEET}")
             else:
                 self.ranking_sheet = self.sheet.worksheet(Settings.RANKING_SHEET)
+
+            # Initialize StoryBosses and StoryProgress sheets
+            self._init_story_sheet()
+            self._init_story_progress_sheet()
 
             # Ensure headers for all sheets
             self._ensure_battle_history_headers()
@@ -560,8 +566,15 @@ class SheetsManager:
                                to report progress during AI generation and sprite processing
         """
         try:
-            # Fix ID integrity before processing
-            self._fix_id_integrity()
+            # Fix ID integrity before processing (throttled to avoid API quota)
+            import time
+            current_time = time.time()
+            if current_time - self.last_id_integrity_check > self.id_integrity_check_interval:
+                logger.info("Running ID integrity check (throttled)...")
+                self._fix_id_integrity()
+                self.last_id_integrity_check = current_time
+            else:
+                logger.debug(f"Skipping ID integrity check (last check: {int(current_time - self.last_id_integrity_check)}s ago)")
 
             # Force fresh data from spreadsheet (avoid cache issues during endless mode)
             # Note: gspread caches worksheet data, so we need to refresh it
@@ -1912,24 +1925,45 @@ class SheetsManager:
                 logger.warning("Story progress sheet is not available (offline mode or initialization failed)")
                 return None
 
-            records = self.story_progress_sheet.get_all_records()
+            # Use expected_headers to handle duplicate header values
+            expected_headers = ['Character ID', 'Current Level', 'Completed', 'EndlessAccess', 'Victories', 'Attempts', 'Last Played']
+            records = self.story_progress_sheet.get_all_records(expected_headers=expected_headers)
             for record in records:
                 if str(record.get('Character ID')) == str(character_id):
                     victories = []
                     victories_str = record.get('Victories', '')
                     if victories_str:
-                        # Handle both string and integer values
+                        # Handle both string and integer values, skip non-numeric values
                         if isinstance(victories_str, str):
-                            victories = [int(x.strip()) for x in victories_str.split(',') if x.strip()]
+                            # Skip boolean strings like 'TRUE' or 'FALSE'
+                            if victories_str.upper() not in ['TRUE', 'FALSE', '']:
+                                try:
+                                    victories = [int(x.strip()) for x in victories_str.split(',') if x.strip() and x.strip().upper() not in ['TRUE', 'FALSE']]
+                                except ValueError as e:
+                                    logger.warning(f"Could not parse victories string: {victories_str}, error: {e}")
+                                    victories = []
                         elif isinstance(victories_str, int):
                             victories = [victories_str] if victories_str > 0 else []
+
+                    # Parse attempts field safely
+                    attempts = 0
+                    attempts_value = record.get('Attempts', 0)
+                    try:
+                        if isinstance(attempts_value, str) and attempts_value.upper() in ['TRUE', 'FALSE', '']:
+                            attempts = 0
+                        else:
+                            attempts = int(attempts_value)
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not parse attempts value: {attempts_value}")
+                        attempts = 0
 
                     return StoryProgress(
                         character_id=str(character_id),
                         current_level=int(record.get('Current Level', 1)),
                         completed=record.get('Completed', 'FALSE') == 'TRUE',
+                        endless_access=record.get('EndlessAccess', 'FALSE') == 'TRUE',
                         victories=victories,
-                        attempts=int(record.get('Attempts', 0)),
+                        attempts=attempts,
                         last_played=datetime.fromisoformat(record.get('Last Played', datetime.now().isoformat()))
                     )
             return None
@@ -1950,7 +1984,9 @@ class SheetsManager:
                 logger.error("Story progress sheet is not available (offline mode or initialization failed)")
                 return False
 
-            records = self.story_progress_sheet.get_all_records()
+            # Use expected_headers to handle duplicate header values
+            expected_headers = ['Character ID', 'Current Level', 'Completed', 'EndlessAccess', 'Victories', 'Attempts', 'Last Played']
+            records = self.story_progress_sheet.get_all_records(expected_headers=expected_headers)
             victories_str = ','.join([str(v) for v in progress.victories])
 
             # Check if progress already exists
@@ -1962,11 +1998,12 @@ class SheetsManager:
                         progress.character_id,
                         progress.current_level,
                         'TRUE' if progress.completed else 'FALSE',
+                        'TRUE' if progress.endless_access else 'FALSE',
                         victories_str,
                         progress.attempts,
                         datetime.now().isoformat()
                     ]]
-                    self.story_progress_sheet.update(f'A{row_num}:F{row_num}', values)
+                    self.story_progress_sheet.update(f'A{row_num}:G{row_num}', values)
                     logger.info(f"Updated story progress for character {progress.character_id}")
                     return True
 
@@ -1975,6 +2012,7 @@ class SheetsManager:
                 progress.character_id,
                 progress.current_level,
                 'TRUE' if progress.completed else 'FALSE',
+                'TRUE' if progress.endless_access else 'FALSE',
                 victories_str,
                 progress.attempts,
                 datetime.now().isoformat()
@@ -2018,16 +2056,39 @@ class SheetsManager:
             try:
                 self.story_progress_sheet = self.sheet.worksheet("StoryProgress")
                 logger.info("StoryProgress sheet found")
+
+                # Verify and fix headers if needed
+                self._ensure_story_progress_headers()
+
             except:
                 # Create the sheet if it doesn't exist
-                self.story_progress_sheet = self.sheet.add_worksheet(title="StoryProgress", rows=1000, cols=6)
-                headers = ['Character ID', 'Current Level', 'Completed', 'Victories', 'Attempts', 'Last Played']
-                self.story_progress_sheet.update('A1:F1', [headers])
+                self.story_progress_sheet = self.sheet.add_worksheet(title="StoryProgress", rows=1000, cols=7)
+                headers = ['Character ID', 'Current Level', 'Completed', 'EndlessAccess', 'Victories', 'Attempts', 'Last Played']
+                self.story_progress_sheet.update('A1:G1', [headers])
                 logger.info("Created StoryProgress sheet")
 
         except Exception as e:
             logger.error(f"Error initializing story progress sheet: {e}")
             self.story_progress_sheet = None
+
+    def _ensure_story_progress_headers(self):
+        """Ensure StoryProgress sheet has correct headers"""
+        try:
+            if not self.story_progress_sheet:
+                return
+
+            expected_headers = ['Character ID', 'Current Level', 'Completed', 'EndlessAccess', 'Victories', 'Attempts', 'Last Played']
+            current_headers = self.story_progress_sheet.row_values(1)
+
+            # Check if headers are correct
+            if current_headers != expected_headers:
+                logger.warning(f"StoryProgress headers incorrect. Current: {current_headers}")
+                logger.info(f"Fixing StoryProgress headers to: {expected_headers}")
+                self.story_progress_sheet.update('A1:G1', [expected_headers])
+                logger.info("StoryProgress headers fixed")
+
+        except Exception as e:
+            logger.error(f"Error ensuring story progress headers: {e}")
 
     def _fix_id_integrity(self):
         """Fix character ID integrity issues (duplicates, gaps, wrong order)

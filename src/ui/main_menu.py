@@ -132,6 +132,7 @@ class MainMenuWindow:
         game_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Game", menu=game_menu)
         game_menu.add_command(label="Story Mode", command=self._start_story_mode)
+        game_menu.add_command(label="Auto Story Mode", command=self._start_auto_story_mode)
         game_menu.add_separator()
         game_menu.add_command(label="Story Boss Manager", command=self._show_story_boss_manager)
         game_menu.add_separator()
@@ -887,6 +888,31 @@ class MainMenuWindow:
 
             # Character selection dialog
             StoryModeCharacterSelectionWindow(self.root, self.characters, self.db_manager, self.visual_mode_var.get())
+
+        except Exception as e:
+            logger.error(f"Error starting story mode: {e}")
+            messagebox.showerror("Error", f"Failed to start story mode: {e}")
+
+    def _start_auto_story_mode(self):
+        """Start auto story mode (runs story mode for all characters automatically)"""
+        try:
+            # Initialize story mode engine
+            from src.services.story_mode_engine import StoryModeEngine
+            story_engine = StoryModeEngine(self.db_manager)
+
+            # Start auto story mode
+            result = story_engine.start_auto_story_mode(visual_mode=self.visual_mode_var.get())
+
+            if not result:
+                messagebox.showwarning("Warning", "Failed to start auto story mode")
+                return
+
+            if result['status'] == 'waiting':
+                messagebox.showinfo("Auto Story Mode", result.get('message', '新しいキャラクターを待機中...'))
+                return
+
+            # Create auto story mode window
+            AutoStoryModeWindow(self.root, story_engine, self.visual_mode_var.get())
 
         except Exception as e:
             logger.error(f"Error starting story mode: {e}")
@@ -2873,9 +2899,12 @@ class EndlessBattleWindow:
         status = self.endless_engine.get_status()
         self.battle_count_var.set(f"総バトル数: {status['total_battles']}")
         self.remaining_var.set(f"待機中の挑戦者: 0")
-        self.status_var.set("新しい挑戦者を待っています...")
+        self.status_var.set(f"新しい挑戦者を待っています... (次回チェック: {self.check_interval // 1000}秒後)")
 
-        self._log(result['message'])
+        # Log with timestamp
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        self._log(f"[{timestamp}] {result['message']}")
 
     def _update_battle_complete(self, result):
         """Update UI after battle completion"""
@@ -2932,4 +2961,156 @@ class EndlessBattleWindow:
             final_msg = f"エンドレスバトル終了\n総バトル数: {result['total_battles']}\n最終チャンピオン: {result['final_champion'].name}\nチャンピオン連勝数: {result['champion_wins']}"
             messagebox.showinfo("バトル終了", final_msg)
 
+            self.window.destroy()
+
+
+class AutoStoryModeWindow:
+    """Auto Story Mode execution window"""
+
+    def __init__(self, parent, story_engine, visual_mode: bool = False):
+        self.parent = parent
+        self.story_engine = story_engine
+        self.visual_mode = visual_mode
+        self.is_running = True
+
+        self.window = tk.Toplevel(parent)
+        self.window.title("自動ストーリーモード")
+        self.window.geometry("800x600")
+        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._create_ui()
+        self._start_auto_battles()
+
+    def _create_ui(self):
+        """Create UI components"""
+        main_frame = ttk.Frame(self.window, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        title_label = ttk.Label(main_frame, text="自動ストーリーモード", font=("", 16, "bold"))
+        title_label.pack(pady=(0, 10))
+
+        # Status frame
+        status_frame = ttk.LabelFrame(main_frame, text="現在の状態", padding=10)
+        status_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.current_char_label = ttk.Label(status_frame, text="キャラクター: ---", font=("", 12))
+        self.current_char_label.pack(anchor=tk.W)
+
+        self.current_boss_label = ttk.Label(status_frame, text="ボス: ---", font=("", 12))
+        self.current_boss_label.pack(anchor=tk.W)
+
+        self.status_label = ttk.Label(status_frame, text="状態: 準備中...", font=("", 12))
+        self.status_label.pack(anchor=tk.W)
+
+        # Progress text
+        log_frame = ttk.LabelFrame(main_frame, text="進行状況", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.log_text = tk.Text(log_frame, height=20, state=tk.DISABLED)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.config(yscrollcommand=scrollbar.set)
+
+        # Control buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X)
+
+        self.stop_button = ttk.Button(button_frame, text="停止", command=self._stop_auto_mode)
+        self.stop_button.pack(side=tk.RIGHT)
+
+    def _log(self, message: str):
+        """Add message to log"""
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.insert(tk.END, f"{message}\n")
+        self.log_text.see(tk.END)
+        self.log_text.config(state=tk.DISABLED)
+        self.window.update()
+
+    def _start_auto_battles(self):
+        """Start auto battle loop"""
+        self._log("自動ストーリーモード開始")
+        self.window.after(100, self._run_next_battle)
+
+    def _run_next_battle(self):
+        """Run next battle in queue"""
+        if not self.is_running:
+            return
+
+        try:
+            result = self.story_engine.run_next_story_battle(visual_mode=self.visual_mode)
+
+            if not result:
+                self._log("エラー: バトルの実行に失敗しました")
+                self.is_running = False
+                return
+
+            status = result['status']
+
+            if status == 'waiting':
+                self.status_label.config(text="状態: 新しいキャラクターを待機中...")
+                self._log(result.get('message', '新しいキャラクターを待機中...'))
+                # Wait and check again
+                self.window.after(5000, self._run_next_battle)
+                return
+
+            elif status == 'completed':
+                char = result['character']
+                self._log(f"✓ {char.name} がストーリーモードをクリアしました！")
+                self._log(f"  → エンドレスモードへのアクセスが許可されました")
+                self.current_char_label.config(text=f"キャラクター: {char.name} (クリア!)")
+
+                # Continue to next character
+                self.window.after(2000, self._run_next_battle)
+                return
+
+            elif status == 'victory':
+                char = result['character']
+                boss_level = result['boss_level']
+                next_level = result['next_boss_level']
+                self._log(f"✓ {char.name} がBoss Lv{boss_level}を倒しました")
+                self.current_char_label.config(text=f"キャラクター: {char.name}")
+                self.current_boss_label.config(text=f"次のボス: Lv{next_level}")
+                self.status_label.config(text=f"状態: Lv{next_level}に挑戦中...")
+
+                # Continue to next boss
+                self.window.after(1000, self._run_next_battle)
+                return
+
+            elif status == 'defeated':
+                char = result['character']
+                boss_level = result['boss_level']
+                self._log(f"✗ {char.name} はBoss Lv{boss_level}に敗北しました")
+                self.current_char_label.config(text=f"キャラクター: --- (次へ)")
+
+                # Continue to next character
+                self.window.after(2000, self._run_next_battle)
+                return
+
+        except Exception as e:
+            logger.error(f"Error in auto story mode: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self._log(f"エラー: {e}")
+            self.is_running = False
+
+    def _stop_auto_mode(self):
+        """Stop auto story mode"""
+        if messagebox.askyesno("確認", "自動ストーリーモードを停止しますか？"):
+            self.is_running = False
+            self.story_engine.stop_auto_story_mode()
+            self._log("自動ストーリーモード停止")
+            self.status_label.config(text="状態: 停止")
+            self.stop_button.config(state=tk.DISABLED)
+
+    def _on_close(self):
+        """Handle window close"""
+        if self.is_running:
+            if messagebox.askyesno("確認", "自動ストーリーモードを終了しますか？"):
+                self.story_engine.stop_auto_story_mode()
+                self.window.destroy()
+        else:
             self.window.destroy()

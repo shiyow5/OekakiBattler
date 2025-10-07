@@ -42,6 +42,7 @@ class StoryProgress(BaseModel):
     character_id: str
     current_level: int = Field(default=1, ge=1, le=5)
     completed: bool = False
+    endless_access: bool = False  # True if character has cleared story mode and can access endless mode
     victories: list[int] = Field(default_factory=list)  # List of defeated boss levels
     attempts: int = Field(default=0)
     last_played: datetime = Field(default_factory=datetime.now)
