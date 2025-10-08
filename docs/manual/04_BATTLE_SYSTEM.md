@@ -779,48 +779,58 @@ def _update_records(self, battle: Battle):
 
 ### 4.8.3 結果表示
 
+**仕様（修正63）:**
+- **表示時間**: 10秒間の自動表示（以前は5秒）
+- **カウントダウン**: 残り時間を画面上に表示
+- **手動クローズ**: クリック、スペースキー、ESCキーで即座に閉じることが可能
+
 ```python
-def _show_battle_result(self, battle: Battle):
-    """バトル結果を表示"""
-    result_window = tk.Toplevel(self.root)
-    result_window.title("バトル結果")
-    result_window.geometry("500x400")
+def _show_battle_result(self, battle: Battle, char1: Character, char2: Character,
+                       char1_hp: int, char2_hp: int):
+    """バトル結果を全画面で表示"""
+    # Pygame全画面表示
+    # 勝者表示: "VICTORY!" または "DRAW!"
+    # 勝者名: 大きなフォントで中央に
+    # キャラクター画像: 勝者（左・大）と敗者（右・小）
+    # バトル統計パネル:
+    #   - バトル時間
+    #   - 総ターン数
+    #   - 各キャラクターの最終HP
 
-    # 勝者表示
-    if battle.winner_id:
-        winner_text = f"勝者: {battle.winner_name}"
-        color = "gold"
-    else:
-        winner_text = "引き分け"
-        color = "gray"
+    # 自動クローズ設定
+    auto_close_time = 10.0  # 10秒後に自動で閉じる
 
-    tk.Label(result_window, text=winner_text,
-             font=("Arial", 24, "bold"), fg=color).pack(pady=20)
+    # イベントループ
+    while waiting:
+        # カウントダウン表示更新
+        remaining_time = max(0, auto_close_time - elapsed_time)
+        instruction_text = f"クリックまたはスペースキーで閉じる ({remaining_time:.1f}秒後に自動で閉じます)"
 
-    # 統計情報
-    stats_frame = tk.Frame(result_window)
-    stats_frame.pack(pady=10)
+        # マウスクリック、キー入力で即座に終了
+        for event in pygame.event.get():
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                waiting = False  # クリックで閉じる
+            elif event.type == pygame.KEYDOWN:
+                if event.key in [pygame.K_ESCAPE, pygame.K_SPACE]:
+                    waiting = False  # ESC/スペースで閉じる
 
-    stats_text = f"""
-ターン数: {battle.total_turns}
-所要時間: {battle.duration:.1f}秒
-結果タイプ: {battle.result_type}
-
-{battle.character1_name}:
-  最終HP: {battle.char1_final_hp}
-  与ダメージ: {battle.char1_damage_dealt}
-
-{battle.character2_name}:
-  最終HP: {battle.char2_final_hp}
-  与ダメージ: {battle.char2_damage_dealt}
-    """
-
-    tk.Label(stats_frame, text=stats_text, justify=tk.LEFT).pack()
-
-    # 閉じるボタン
-    tk.Button(result_window, text="閉じる",
-              command=result_window.destroy).pack(pady=10)
+        # タイムアウトで自動終了
+        if elapsed_time >= auto_close_time:
+            waiting = False
 ```
+
+**表示内容:**
+1. **勝敗表示**: "VICTORY!" / "DRAW!"（大きな黄金色のテキスト）
+2. **勝者名**: 中央に大きく表示
+3. **キャラクター画像**:
+   - 勝者: 左側、大きめ（120%）、金色のボーダー、王冠マーク
+   - 敗者: 右側、小さめ（75%）、グレーのボーダー
+4. **バトル統計パネル**:
+   - バトル時間（秒）
+   - 総ターン数
+   - 各キャラクターの最終HP
+5. **操作案内**: カウントダウンと閉じ方の説明
+6. **OKボタン**: クリック可能
 
 ---
 

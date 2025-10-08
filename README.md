@@ -19,6 +19,8 @@
 - 🎲 **ランダムマッチ**: 自動でキャラクターをマッチング
 - 💾 **データ永続化**: Google Spreadsheetsによるクラウドベースのデータ管理
 - 📱 **LINE Bot連携**: LINEから画像を送信してキャラクター登録・Google Drive保存
+- ⚡ **API最適化**: ポーリング間隔調整でAPI呼び出しを95%削減（修正61-62）
+- 🎯 **バトルリザルト表示**: 10秒間の詳細な結果表示でバトル統計を確認（修正63）
 
 ## 🚀 クイックスタート
 
@@ -169,14 +171,14 @@ python main.py
 
 アプリケーションが自動的に5つのワークシートを作成します：
 
-#### 1. Characters（キャラクターデータ）
+#### 1. Characters（キャラクターデータ）- 14列
 
 | 列 | 項目 | 説明 |
 |---|---|---|
-| A | ID | キャラクターの一意識別子（自動採番） |
+| A | ID | キャラクターの一意識別子（UUID） |
 | B | Name | キャラクター名 |
-| C | Image URL | 元画像のURL（Google Driveなど） |
-| D | Sprite URL | 処理済みスプライトのURL |
+| C | Image URL | 元画像のURL（Google Drive） |
+| D | Sprite URL | 処理済みスプライトのURL（Google Drive） |
 | E | HP | 体力値（10-200） |
 | F | Attack | 攻撃力（10-150） |
 | G | Defense | 防御力（10-100） |
@@ -187,9 +189,10 @@ python main.py
 | L | Created At | 作成日時（ISO形式） |
 | M | Wins | 勝利数 |
 | N | Losses | 敗北数 |
-| O | Draws | 引き分け数 |
 
 **ステータス合計の上限**: 350
+
+**注意**: 引き分け（Draws）列は削除されました。バトルシステムが引き分けを生成しないため。
 
 #### 2. BattleHistory（バトル履歴）
 
@@ -213,7 +216,7 @@ python main.py
 | N | F2 Damage Dealt | ファイター2の与ダメージ |
 | O | Result Type | 決着タイプ（KO/Time Limit/Draw） |
 
-#### 3. Rankings（ランキング）
+#### 3. Rankings（ランキング）- 10列
 
 バトル終了後に自動更新されます：
 
@@ -225,12 +228,14 @@ python main.py
 | D | Total Battles | 総バトル数 |
 | E | Wins | 勝利数 |
 | F | Losses | 敗北数 |
-| G | Draws | 引き分け数 |
+| G | Draws | 引き分け数（常に0） |
 | H | Win Rate (%) | 勝率（%） |
 | I | Avg Damage Dealt | 平均与ダメージ |
-| J | Rating | レーティング（勝利×3＋引き分け） |
+| J | Rating | レーティング（勝利×3） |
 
-#### 4. StoryBosses（ストーリーボス）
+**注意**: バトルシステムが引き分けを生成しないため、Draws列は常に0です。
+
+#### 4. StoryBosses（ストーリーボス）- 11列
 
 ストーリーモード用のボスキャラクター情報：
 
@@ -245,23 +250,28 @@ python main.py
 | G | Magic | 魔法力（10-150） |
 | H | Luck | 運（0-100） |
 | I | Description | ボスの説明 |
-| J | Image URL | 元画像のURL |
-| K | Sprite URL | スプライトのURL |
+| J | Image URL | 元画像のURL（Google Drive） |
+| K | Sprite URL | スプライトのURL（Google Drive） |
 
-**ボスステータス合計の上限**: 500
+**ボスステータス合計の上限**: 500（通常キャラクターより高い）
 
-#### 5. StoryProgress（ストーリー進行状況）
+#### 5. StoryProgress（ストーリー進行状況）- 7列
 
-各プレイヤーのストーリーモード進捗：
+各プレイヤーのストーリーモード進捗とエンドレスアクセス管理：
 
 | 列 | 項目 | 説明 |
 |---|---|---|
 | A | Character ID | プレイヤーキャラクターのID |
 | B | Current Level | 現在のレベル（1-5） |
 | C | Completed | クリア済みかどうか（TRUE/FALSE） |
-| D | Victories | 撃破済みボスレベル（カンマ区切り） |
-| E | Attempts | 挑戦回数 |
-| F | Last Played | 最終プレイ日時 |
+| D | EndlessAccess | エンドレスモードアクセス権（TRUE/FALSE）※ストーリーモード挑戦で付与 |
+| E | Victories | 撃破済みボスレベル（カンマ区切り、例: "1,2,3"） |
+| F | Attempts | 挑戦回数 |
+| G | Last Played | 最終プレイ日時（ISO形式） |
+
+**重要な変更**:
+- **EndlessAccess列を追加**（修正60）: キャラクターがストーリーモードに挑戦すると（勝敗に関わらず）エンドレスモードへのアクセス権が付与されます
+- 以前はCharactersシートに`EndlessAccess`列がありましたが、StoryProgressシートに移動されました（データ構造の正規化）
 
 **注意**:
 - 初回起動時にヘッダーが自動生成されます
@@ -531,12 +541,15 @@ chmod +x server_up.sh
 
 #### エンドレスバトル
 1. 「Endless Battle」をクリック
-2. ランダムに選ばれたチャンピオンが挑戦者と自動対戦
-3. チャンピオンが防衛を続ける勝ち抜き戦形式
-4. 新しいキャラクターを登録すると自動的に検出され対戦再開
-5. バトルログで戦況をリアルタイム確認
-6. 一時停止/再開可能
-7. 終了時に最終統計を表示
+2. **アクセス制限**: ストーリーモードに挑戦したキャラクターのみが参加可能（修正60）
+3. ランダムに選ばれたチャンピオンが挑戦者と自動対戦
+4. チャンピオンが防衛を続ける勝ち抜き戦形式
+5. 新しいキャラクターを登録すると自動的に検出され対戦再開（10秒間隔、修正62）
+6. バトルログで戦況をリアルタイム確認
+7. 一時停止/再開可能
+8. 終了時に最終統計を表示
+
+**注意**: エンドレスアクセス権はストーリーモード挑戦時に自動付与されます（勝敗は問いません）
 
 ### 3. 統計確認
 
@@ -567,42 +580,62 @@ chmod +x server_up.sh
 ```
 OekakiBattler/
 ├── main.py                 # メインアプリケーション
+├── img2txt.py              # スタンドアロンAI画像分析ツール
 ├── config/                 # 設定ファイル
 │   ├── settings.py         # 全体設定
-│   └── database.py         # データベース設定
+│   └── database.py         # データベース設定（SQLite）
 ├── src/
-│   ├── models/             # データモデル
+│   ├── models/             # データモデル（Pydantic）
 │   │   ├── character.py    # キャラクターモデル
 │   │   ├── battle.py       # バトルモデル
-│   │   └── story_boss.py   # ストーリーボスモデル
+│   │   └── story_boss.py   # ストーリーボス・進行状況モデル
 │   ├── services/           # ビジネスロジック
-│   │   ├── image_processor.py       # 画像処理
-│   │   ├── ai_analyzer.py           # AI分析
+│   │   ├── image_processor.py       # 画像処理（背景除去・スプライト生成）
+│   │   ├── ai_analyzer.py           # AI分析（Google Gemini）
 │   │   ├── battle_engine.py         # バトルエンジン
 │   │   ├── endless_battle_engine.py # エンドレスバトルエンジン
 │   │   ├── story_mode_engine.py     # ストーリーモードエンジン
-│   │   └── sheets_manager.py        # Google Sheets管理
+│   │   ├── sheets_manager.py        # Google Sheets/Drive管理
+│   │   ├── database_manager.py      # SQLite管理（オフラインモード）
+│   │   ├── audio_manager.py         # サウンド管理
+│   │   └── settings_manager.py      # ユーザー設定管理
 │   ├── ui/                 # ユーザーインターフェース
-│   │   ├── main_menu.py    # メインGUI
+│   │   ├── main_menu.py    # メインGUI（Tkinter + Pygame）
 │   │   └── story_boss_manager.py # ストーリーボス管理画面
 │   └── utils/              # ユーティリティ
-├── credentials.json        # Google サービスアカウント認証情報（要作成）
-├── server/                 # LINE Botサーバー
-│   ├── server.js           # Node.jsサーバー
-│   └── .env                # 環境変数設定
-├── server_up.sh            # サーバー起動スクリプト
+│       ├── image_utils.py  # 画像ユーティリティ
+│       └── file_utils.py   # ファイルI/O
+├── credentials.json        # Google サービスアカウント認証情報（要作成、.gitignore）
+├── server/                 # LINE Botサーバー（Node.js）
+│   ├── server.js           # Express.jsサーバー
+│   ├── .env                # 環境変数設定（.gitignore）
+│   └── googlesheet_apps_script_*.js  # Google Apps Script
+├── server_up.sh            # サーバー起動スクリプト（ngrok込み）
 ├── assets/                 # アセットファイル
-│   ├── images/            # 画像ファイル
+│   ├── images/             # 画像ファイル
 │   │   ├── battle_arena.png    # バトル背景画像
 │   │   └── vs.jpg              # バトル開始画面背景
-│   └── sounds/            # サウンドファイル
-├── data/                   # データファイル
-│   ├── characters/         # 元画像
-│   └── sprites/           # 処理済みスプライト
+│   └── sounds/             # サウンドファイル（WAV推奨）
+├── data/                   # データファイル（実行時生成）
+│   ├── database.db         # SQLiteデータベース（オフラインモード）
+│   ├── characters/         # 元画像キャッシュ
+│   └── sprites/            # 処理済みスプライトキャッシュ
 ├── docs/                   # ドキュメント
-│   ├── USER_MANUAL.md      # ユーザーマニュアル
-│   └── API_REFERENCE.md    # API仕様書
-└── requirements.txt        # 依存関係
+│   └── manual/             # マニュアル集
+│       ├── PARTICIPANT_GUIDE.md      # 🎨 参加者向けガイド
+│       ├── OPERATOR_MANUAL.md        # 👨‍💼 現場オペレーター向けマニュアル
+│       ├── 00_INDEX.md ~ 09_API_REFERENCE.md  # 💻 技術マニュアル
+│       ├── COMPLETE_MANUAL.md        # 技術マニュアル統合版
+│       └── combine_manuals.py        # マニュアル統合スクリプト
+├── tests/                  # テストコード
+│   ├── test_models.py      # モデルテスト
+│   ├── test_battle_engine.py  # バトルエンジンテスト
+│   └── ...
+├── SPECIFICATION.md        # プロジェクト仕様書
+├── CHANGES.md              # 変更履歴
+├── CLAUDE.md               # Claude Code向けプロジェクト説明
+├── requirements.txt        # Python依存関係
+└── .env                    # 環境変数設定（要作成、.gitignore）
 ```
 
 ## 🎨 カスタマイズ可能な要素
@@ -652,18 +685,21 @@ AIは以下の観点でキャラクターを分析します：
 ### ストーリーモード
 - **固定ボス**: Lv1～Lv5までの5体のボス
 - **順次挑戦**: Lv1から順番に挑戦、勝利すると次のレベルへ進行
-- **ノンストップ実行**: 一度開始すると敗北またはクリアまで連続バトル
+- **ノンストップ実行**: 一度開始すると敗北またはクリアまで連続バトル（10秒待機間隔、修正62）
 - **挑戦確認**: 各バトル前にボス情報と「挑戦します！」を表示
-- **進捗記録**: キャラクターごとに進行状況を保存
-- **ボス管理**: 専用UIでボスの作成・編集が可能
+- **進捗記録**: キャラクターごとに進行状況を保存（StoryProgressシート）
+- **ボス管理**: 専用UIでボスの作成・編集が可能（StoryBossesシート）
 - **ステータス範囲**: HP (10-300)、Attack (10-200)、Defense (10-150)、Speed (10-150)、Magic (10-150)、Luck (0-100)、合計上限500
 - **クリア条件**: Lv5のボスを倒すと完全クリア
+- **エンドレスアクセス付与**: ストーリーモードに挑戦すると（勝敗に関わらず）エンドレスモードへのアクセス権が付与される（修正60）
+- **自動ストーリーモード**: 全キャラクターを自動的にストーリーモードに挑戦させる機能（Menu → Game → Auto Story Mode）（修正60）
 
 ### エンドレスバトル
 - **トーナメント形式**: ランダムに選ばれたチャンピオンが挑戦者と連戦
+- **アクセス制限**: ストーリーモードに挑戦したキャラクターのみが参加可能（修正60）
 - **勝ち抜き戦**: チャンピオンが勝利し続ける限り防衛継続
 - **チャンピオン交代**: 挑戦者が勝利すると新チャンピオン誕生
-- **新キャラ自動検出**: 3秒ごとに新規登録キャラを自動検出
+- **新キャラ自動検出**: 10秒ごとに新規登録キャラを自動検出（修正62、API最適化）
 - **自動再開**: 新キャラクター検出時に自動でバトル再開
 - **連勝記録**: チャンピオンの防衛記録を追跡
 - **一時停止機能**: いつでもバトルを停止・再開可能
@@ -716,9 +752,40 @@ AIは以下の観点でキャラクターを分析します：
 
 ## 📚 ドキュメント
 
-- [ユーザーマニュアル](docs/USER_MANUAL.md) - 使用方法とトラブルシューティング
-- [API仕様書](docs/API_REFERENCE.md) - 開発者向け技術資料
-- [プロジェクト仕様書](SPECIFICATION.md) - 詳細な要件定義
+### マニュアル（役割別）
+
+お絵描きバトラーには **4つの役割** があります。あなたの役割に合ったマニュアルをご覧ください。
+
+#### 🎨 参加者（絵を描いてバトルを見る人）
+- [**PARTICIPANT_GUIDE.md**](docs/manual/PARTICIPANT_GUIDE.md) - イベント参加者向けガイド
+  - キャラクターの描き方のコツ
+  - ステータスの決まり方
+  - バトルの見方
+
+#### 👨‍💼 現場オペレーター（アプリを操作する人）
+- [**OPERATOR_MANUAL.md**](docs/manual/OPERATOR_MANUAL.md) - 運営マニュアル ⭐重要
+  - アプリの起動と終了
+  - キャラクター登録作業の手順
+  - バトル実行とモード選択
+  - トラブル対応と緊急時対応
+  - 1日の運営フロー
+
+#### 🔧 セットアップ担当（環境構築する人）
+- [**02_INSTALLATION.md**](docs/manual/02_INSTALLATION.md) - インストールガイド
+  - 必要な環境とツール
+  - 依存関係のインストール
+  - 環境変数の設定
+  - Google API設定
+
+#### 💻 開発者（コードを書く人）
+- [**技術マニュアル**](docs/manual/) - 詳細な技術仕様書（10ファイル）
+  - システムアーキテクチャ
+  - バトルシステム仕様
+  - データ管理
+  - API リファレンス
+- [**COMPLETE_MANUAL.md**](docs/manual/COMPLETE_MANUAL.md) - 全技術マニュアル統合版
+- [**SPECIFICATION.md**](SPECIFICATION.md) - 詳細な要件定義
+- [**CHANGES.md**](CHANGES.md) - 変更履歴とアップデート情報
 
 ## 🐛 トラブルシューティング
 
@@ -837,8 +904,16 @@ AIは以下の観点でキャラクターを分析します：
 
 ## ✨ 今後の予定
 
+### 完了済み
 - [x] LINE Bot連携機能
 - [x] ストーリーモード
+- [x] 自動ストーリーモード（修正60）
+- [x] エンドレスアクセス管理（修正60）
+- [x] API最適化（修正61-62、95%削減）
+- [x] Google Sheetsスキーマ正規化（修正60）
+- [x] バトルリザルト表示時間の最適化（修正63、10秒表示）
+
+### 開発予定
 - [ ] Web版の開発
 - [ ] モバイルアプリ対応
 - [ ] オンライン対戦機能
