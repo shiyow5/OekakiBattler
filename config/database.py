@@ -17,6 +17,7 @@ def initialize_database():
             defense INTEGER NOT NULL,
             speed INTEGER NOT NULL,
             magic INTEGER NOT NULL,
+            luck INTEGER DEFAULT 50,
             description TEXT,
             image_path TEXT NOT NULL,
             sprite_path TEXT,
@@ -25,6 +26,13 @@ def initialize_database():
             win_count INTEGER DEFAULT 0
         )
     """)
+
+    # Add luck column to existing tables if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE characters ADD COLUMN luck INTEGER DEFAULT 50")
+    except sqlite3.OperationalError:
+        # Column already exists
+        pass
     
     # Battles table
     cursor.execute("""

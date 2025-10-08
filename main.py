@@ -14,6 +14,11 @@ from pathlib import Path
 os.environ['SDL_VIDEO_ALLOW_SCREENSAVER'] = '1'
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
+# Use cocoa driver on macOS (required for macOS 15+)
+import platform
+if platform.system() == 'Darwin':  # macOS
+    os.environ['SDL_VIDEODRIVER'] = 'cocoa'
+
 # Add src to path for imports
 sys.path.append(str(Path(__file__).parent / "src"))
 
@@ -53,13 +58,6 @@ def main():
         settings_manager.update_settings_class()
         settings_manager.apply_to_audio_manager(audio_manager)
         logger.info("Settings loaded and applied")
-
-        # Initialize Pygame on main thread (macOS 15+ requirement)
-        print("Initializing graphics system...")
-        import pygame
-        if not pygame.get_init():
-            pygame.init()
-            logger.info("Pygame initialized on main thread")
         
         # Check if API key is configured
         if not Settings.GOOGLE_API_KEY:

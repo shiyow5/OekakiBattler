@@ -93,7 +93,7 @@ class SettingsManager:
         
         # Battle settings validation
         if 'battle_speed' in settings:
-            validated['battle_speed'] = max(0.01, min(3.0, float(settings['battle_speed'])))
+            validated['battle_speed'] = max(0.01, min(1.0, float(settings['battle_speed'])))
             
         if 'max_turns' in settings:
             validated['max_turns'] = max(10, min(200, int(settings['max_turns'])))
@@ -154,14 +154,16 @@ class SettingsManager:
         """Apply current settings to battle engine"""
         try:
             if hasattr(battle_engine, 'battle_speed'):
-                battle_engine.battle_speed = self.get_setting('battle_speed', 2.0)
+                battle_speed = self.get_setting('battle_speed', 0.5)
+                battle_engine.battle_speed = battle_speed
+                logger.info(f"Applied battle_speed to engine: {battle_speed}")
             if hasattr(battle_engine, 'max_turns'):
                 battle_engine.max_turns = self.get_setting('max_turns', 50)
             if hasattr(battle_engine, 'critical_chance'):
                 battle_engine.critical_chance = self.get_setting('critical_chance', 0.05)
-                
+
             logger.debug("Settings applied to battle engine")
-            
+
         except Exception as e:
             logger.error(f"Error applying settings to battle engine: {e}")
     
@@ -187,7 +189,7 @@ class SettingsManager:
         """Update the Settings class with current values"""
         try:
             # Update battle settings
-            Settings.BATTLE_SPEED = self.get_setting('battle_speed', 2.0)
+            Settings.BATTLE_SPEED = self.get_setting('battle_speed', 0.5)
             Settings.MAX_TURNS = self.get_setting('max_turns', 50)
             Settings.CRITICAL_CHANCE = self.get_setting('critical_chance', 0.05)
             

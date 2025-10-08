@@ -7,6 +7,10 @@ This document provides technical reference for the Oekaki Battler system compone
 ## Table of Contents
 
 1. [Models](#models)
+   - [Character](#character)
+   - [Battle](#battle)
+   - [StoryBoss](#storyboss)
+   - [StoryProgress](#storyprogress)
 2. [Services](#services)
 3. [Configuration](#configuration)
 4. [Database](#database)
@@ -27,11 +31,12 @@ from src.models import Character
 class Character(BaseModel):
     id: str                    # Unique identifier (UUID)
     name: str                  # Character name
-    hp: int                    # Health Points (50-150)
-    attack: int                # Attack power (30-120)
-    defense: int               # Defense power (20-100)
-    speed: int                 # Speed (40-130)
+    hp: int                    # Health Points (10-200)
+    attack: int                # Attack power (10-150)
+    defense: int               # Defense power (10-100)
+    speed: int                 # Speed (10-100)
     magic: int                 # Magic power (10-100)
+    luck: int                  # Luck (0-100)
     description: str           # Character description
     image_path: str            # Original image file path
     sprite_path: Optional[str] # Processed sprite path
@@ -40,9 +45,13 @@ class Character(BaseModel):
     win_count: int            # Total wins
 ```
 
+**Stat Constraints:**
+- Total stats maximum: 350 (sum of hp + attack + defense + speed + magic + luck)
+- Model validator enforces this limit automatically
+
 **Properties:**
 - `win_rate: float` - Win rate percentage
-- `total_stats: int` - Sum of all stats
+- `total_stats: int` - Sum of all stats (includes luck)
 
 **Methods:**
 - `to_dict() -> dict` - Convert to dictionary for database storage
@@ -90,6 +99,63 @@ class BattleTurn(BaseModel):
     attacker_hp_after: int    # Attacker HP after turn
     defender_hp_after: int    # Defender HP after turn
 ```
+
+### StoryBoss
+
+Represents a story mode boss character.
+
+```python
+from src.models.story_boss import StoryBoss
+
+class StoryBoss(BaseModel):
+    level: int                 # Boss level (1-5)
+    name: str                  # Boss name
+    hp: int                    # Health Points (10-300)
+    attack: int                # Attack power (10-200)
+    defense: int               # Defense power (10-150)
+    speed: int                 # Speed (10-150)
+    magic: int                 # Magic power (10-150)
+    luck: int                  # Luck (0-100)
+    description: str           # Boss description
+    image_path: Optional[str]  # Original image file path/URL
+    sprite_path: Optional[str] # Processed sprite path/URL
+```
+
+**Stat Constraints:**
+- Total stats maximum: 500 (higher than regular characters)
+- Model validator enforces this limit automatically
+
+**Properties:**
+- Wider stat ranges and higher total limit compared to regular characters
+- Level determines boss difficulty (1=easiest, 5=hardest)
+
+**Methods:**
+- `to_dict() -> dict` - Convert to dictionary for database storage
+- `from_dict(data: dict) -> StoryBoss` - Create from dictionary
+
+### StoryProgress
+
+Represents a player's story mode progress.
+
+```python
+from src.models.story_boss import StoryProgress
+
+class StoryProgress(BaseModel):
+    character_id: str          # Player character ID
+    current_level: int         # Current level (1-5)
+    completed: bool            # Whether story mode is completed
+    victories: list[int]       # List of defeated boss levels
+    attempts: int              # Total attempts
+    last_played: datetime      # Last played timestamp
+```
+
+**Properties:**
+- Tracks per-character progress
+- Persists through sessions
+
+**Methods:**
+- `to_dict() -> dict` - Convert to dictionary for database storage
+- `from_dict(data: dict) -> StoryProgress` - Create from dictionary
 
 ---
 
@@ -212,6 +278,17 @@ success = analyzer.test_api_connection()
 - Uses Google Gemini AI model
 - Includes fallback stat generation
 
+**Stat Generation:**
+- Analyzes visual features to determine stats:
+  - HP (10-200): Body size, robustness
+  - Attack (10-150): Weapons, muscular appearance
+  - Defense (10-100): Armor, shields
+  - Speed (10-100): Body type, limb length
+  - Magic (10-100): Magic items, mystical decorations
+  - Luck (0-100): Lucky symbols, bright expressions, sparkly decorations
+- Automatically enforces total stats ≤ 350
+- Proportionally scales down if AI generates stats exceeding limit
+
 ### BattleEngine
 
 Handles automated character battles with Pygame visualization.
@@ -240,6 +317,59 @@ result = engine.get_battle_result(battle, char1, char2)
 
 # Cleanup resources
 engine.cleanup()
+```
+
+### StoryModeEngine
+
+Manages story mode progression and battles.
+
+```python
+from src.services.story_mode_engine import StoryModeEngine
+
+story_engine = StoryModeEngine(db_manager)
+```
+
+**Core Methods:**
+```python
+# Load all bosses
+success = story_engine.load_bosses()
+
+# Get boss by level
+boss = story_engine.get_boss(level=1)
+
+# Get player progress
+progress = story_engine.get_player_progress(character_id)
+
+# Start battle
+battle = story_engine.start_battle(player, boss_level=1)
+
+# Execute battle
+result = story_engine.execute_battle(visual_mode=True)
+
+# Update progress
+success = story_engine.update_progress(character_id, boss_level=1, victory=True)
+
+# Get next boss level
+next_level = story_engine.get_next_boss_level(character_id)
+
+# Check completion
+is_completed = story_engine.is_completed(character_id)
+
+# Reset progress
+success = story_engine.reset_progress(character_id)
+```
+
+**Features:**
+- Sequential boss battles (Lv1-Lv5)
+- Per-character progress tracking
+- Automatic level progression
+- Integration with BattleEngine
+- Sprite caching for boss images
+
+**Boss Management:**
+- Bosses stored in Google Sheets (StoryBosses worksheet)
+- Progress stored in Google Sheets (StoryProgress worksheet)
+- Automatic sprite downloading and caching
 ```
 
 **Configuration:**
@@ -436,6 +566,7 @@ if success:
             defense=stats.defense,
             speed=stats.speed,
             magic=stats.magic,
+            luck=stats.luck,
             description=stats.description,
             image_path="character.png",
             sprite_path=sprite_path

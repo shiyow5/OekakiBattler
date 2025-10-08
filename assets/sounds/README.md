@@ -22,17 +22,22 @@
 - 用途: クリティカルヒット時
 - 推奨: 鋭い衝撃音、高音（0.15-0.3秒）
 
-### 3. 魔法攻撃音 (Magic)
+### 3. ガードブレイク音 (Guard Break)
+- ファイル名: `guard_break.wav`, `guard_break.ogg`, または `guard_break.mp3`
+- 用途: ガードブレイク発動時
+- 推奨: 砕ける音、破壊音、メタル音（0.2-0.3秒）
+
+### 4. 魔法攻撃音 (Magic)
 - ファイル名: `magic.wav`, `magic.ogg`, または `magic.mp3`
 - 用途: 魔法攻撃時
 - 推奨: 神秘的な音、キラキラ音（0.2-0.4秒）
 
-### 4. 攻撃ミス音 (Miss)
+### 5. 攻撃ミス音 (Miss)
 - ファイル名: `miss.wav`, `miss.ogg`, または `miss.mp3`
 - 用途: 攻撃が外れたとき
 - 推奨: 空振り音、下降音（0.1-0.2秒）
 
-### 5. 勝利音 (Victory)
+### 6. 勝利音 (Victory)
 - ファイル名: `victory.wav`, `victory.ogg`, または `victory.mp3`
 - 用途: バトル勝利時
 - 推奨: ファンファーレ、上昇メロディ（0.5-2.0秒）
@@ -42,6 +47,7 @@
 ファイルが見つからない場合、システムは自動的にプログラム生成された効果音を使用します:
 - **attack**: 800Hz ビープ音
 - **critical**: 1200Hz 高音ビープ
+- **guard_break**: 1000Hz 鋭い衝撃音（ノイズミックス）
 - **magic**: 600Hz ワーブル効果
 - **miss**: 400Hz 下降音
 - **victory**: 上昇メロディ
@@ -70,6 +76,7 @@ assets/sounds/
 ├── README.md (このファイル)
 ├── attack.wav
 ├── critical.wav
+├── guard_break.wav
 ├── magic.ogg
 ├── miss.wav
 └── victory.mp3

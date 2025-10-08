@@ -14,7 +14,9 @@ from src.services.database_manager import DatabaseManager
 from src.services.image_processor import ImageProcessor
 from src.services.ai_analyzer import AIAnalyzer
 from src.services.battle_engine import BattleEngine
+from src.services.endless_battle_engine import EndlessBattleEngine
 from src.models import Character
+from src.utils.progress_dialog import AIGenerationDialog
 from config.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -24,12 +26,18 @@ class MainMenuWindow:
     
     def __init__(self, root: tk.Tk):
         logger.info("MainMenuWindow.__init__: Starting initialization")
-        
+
         self.root = root
         self.root.title("お絵描きバトラー - Oekaki Battler")
         self.root.geometry("900x700")
         logger.info("MainMenuWindow.__init__: Basic window setup complete")
-        
+
+        # Initialize Pygame after Tkinter is set up (macOS 15+ requirement)
+        import pygame
+        if not pygame.get_init():
+            pygame.init()
+            logger.info("Pygame initialized after Tkinter setup")
+
         # Services - Try Google Sheets first, fallback to local database
         logger.info("MainMenuWindow.__init__: Initializing database manager")
         sheets_manager = SheetsManager()
@@ -49,6 +57,8 @@ class MainMenuWindow:
         self.ai_analyzer = AIAnalyzer()
         logger.info("MainMenuWindow.__init__: Initializing battle engine")
         self.battle_engine = BattleEngine()
+        logger.info("MainMenuWindow.__init__: Initializing endless battle engine")
+        self.endless_battle_engine = EndlessBattleEngine(self.db_manager, self.battle_engine)
         logger.info("MainMenuWindow.__init__: All services initialized")
         
         # Apply current settings to battle engine
@@ -79,9 +89,11 @@ class MainMenuWindow:
         self._setup_styles()
         logger.info("MainMenuWindow.__init__: Creating widgets")
         self._create_widgets()
-        logger.info("MainMenuWindow.__init__: Loading characters")
-        self._load_characters()
-        
+
+        # Defer character loading to allow UI to fully initialize (prevents segfault)
+        logger.info("MainMenuWindow.__init__: Scheduling character loading")
+        self.root.after(100, self._load_characters)
+
         logger.info("Main menu window initialized")
     
     def _setup_styles(self):
@@ -111,6 +123,21 @@ class MainMenuWindow:
     
     def _create_widgets(self):
         """Create main GUI widgets"""
+        logger.info("MainMenuWindow._create_widgets: Creating menu bar")
+        # Menu bar
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        # Game menu
+        game_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Game", menu=game_menu)
+        game_menu.add_command(label="Story Mode", command=self._start_story_mode)
+        game_menu.add_command(label="Auto Story Mode", command=self._start_auto_story_mode)
+        game_menu.add_separator()
+        game_menu.add_command(label="Story Boss Manager", command=self._show_story_boss_manager)
+        game_menu.add_separator()
+        game_menu.add_command(label="Exit", command=self.root.quit)
+
         logger.info("MainMenuWindow._create_widgets: Creating main container")
         # Main container
         main_frame = ttk.Frame(self.root, padding="10")
@@ -125,7 +152,7 @@ class MainMenuWindow:
         
         logger.info("MainMenuWindow._create_widgets: Creating title label")
         # Title
-        title_label = ttk.Label(main_frame, text="🎨 お絵描きバトラー", style='Title.TLabel')
+        title_label = ttk.Label(main_frame, text="お絵描きバトラー", style='Title.TLabel')
         title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
         
         logger.info("MainMenuWindow._create_widgets: Creating action panel")
@@ -154,59 +181,67 @@ class MainMenuWindow:
         # Character registration
         ttk.Button(
             action_frame,
-            text="📷 Register Character",
+            text="Register Character",
             command=self._register_character,
-            style='Action.TButton',
             width=20
         ).pack(pady=5, fill=tk.X)
-        
+
         # Character deletion
         ttk.Button(
             action_frame,
-            text="🗑️ Delete Character",
+            text="Delete Character",
             command=self._delete_character,
             width=20
         ).pack(pady=5, fill=tk.X)
-        
+
         # View statistics
         ttk.Button(
             action_frame,
-            text="📊 View Statistics", 
+            text="View Statistics",
             command=self._show_statistics,
             width=20
         ).pack(pady=5, fill=tk.X)
-        
+
         # Battle history
         ttk.Button(
             action_frame,
-            text="🏟️ Battle History",
+            text="Battle History",
             command=self._show_battle_history,
             width=20
         ).pack(pady=5, fill=tk.X)
-        
+
         # Settings
         ttk.Button(
             action_frame,
-            text="⚙️ Settings",
+            text="Settings",
             command=self._show_settings,
             width=20
         ).pack(pady=5, fill=tk.X)
-        
+
+        # Story Boss Management - Temporarily disabled to debug segfault
+        # boss_mgr_btn = ttk.Button(
+        #     action_frame,
+        #     text="Story Boss Manager",
+        #     command=self._show_story_boss_manager,
+        #     width=20
+        # )
+        # boss_mgr_btn.pack(pady=5, fill=tk.X)
+
         # Separator
         ttk.Separator(action_frame, orient='horizontal').pack(pady=10, fill=tk.X)
         
         # Test AI connection
         ttk.Button(
             action_frame,
-            text="🔗 Test AI Connection",
+            text="Test AI Connection",
             command=self._test_ai_connection,
             width=20
         ).pack(pady=5, fill=tk.X)
-        
+
         # Refresh characters
         ttk.Button(
             action_frame,
-            text="🔄 Refresh",
+            text="Refresh",
             command=self._load_characters,
             width=20
         ).pack(pady=5, fill=tk.X)
@@ -225,9 +260,9 @@ class MainMenuWindow:
         list_frame.rowconfigure(0, weight=1)
         
         # Treeview for characters (supports Japanese names)
-        columns = ('Name', 'HP', 'ATK', 'DEF', 'SPD', 'MAG', 'Battles', 'Wins')
+        columns = ('Name', 'HP', 'ATK', 'DEF', 'SPD', 'MAG', 'LCK', 'Battles', 'Wins')
         self.char_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15)
-        
+
         # Configure font to support Japanese characters in character list
         try:
             import tkinter.font as tkFont
@@ -236,7 +271,7 @@ class MainMenuWindow:
             self.char_tree.configure(style="Japanese.Treeview")
         except:
             pass
-        
+
         # Configure columns
         self.char_tree.heading('Name', text='Name')
         self.char_tree.heading('HP', text='HP')
@@ -244,9 +279,10 @@ class MainMenuWindow:
         self.char_tree.heading('DEF', text='DEF')
         self.char_tree.heading('SPD', text='SPD')
         self.char_tree.heading('MAG', text='MAG')
+        self.char_tree.heading('LCK', text='LCK')
         self.char_tree.heading('Battles', text='Battles')
         self.char_tree.heading('Wins', text='Wins')
-        
+
         # Column widths
         self.char_tree.column('Name', width=120)
         self.char_tree.column('HP', width=50)
@@ -254,6 +290,7 @@ class MainMenuWindow:
         self.char_tree.column('DEF', width=50)
         self.char_tree.column('SPD', width=50)
         self.char_tree.column('MAG', width=50)
+        self.char_tree.column('LCK', width=50)
         self.char_tree.column('Battles', width=60)
         self.char_tree.column('Wins', width=50)
         
@@ -351,32 +388,42 @@ class MainMenuWindow:
         logger.info("MainMenuWindow._create_battle_panel: Creating battle button")
         # Battle button - without problematic custom style
         logger.info("MainMenuWindow._create_battle_panel: Creating ttk.Button without custom style")
+        self.root.update_idletasks()  # Process pending events
         self.battle_button = ttk.Button(
             battle_frame,
-            text="⚔️ START BATTLE!",
+            text="START BATTLE",
             command=self._start_battle
         )
+        logger.info("MainMenuWindow._create_battle_panel: Battle button created")
+        self.root.update_idletasks()  # Process pending events
         self.battle_button.pack(pady=15, fill=tk.X)
-        logger.info("MainMenuWindow._create_battle_panel: Battle button created successfully")
-        
+        logger.info("MainMenuWindow._create_battle_panel: Battle button packed successfully")
+
         logger.info("MainMenuWindow._create_battle_panel: Creating random battle button")
         # Random battle button
-        try:
-            ttk.Button(
-                battle_frame,
-                text="🎲 Random Battle",
-                command=self._random_battle
-            ).pack(pady=5, fill=tk.X)
-            logger.info("MainMenuWindow._create_battle_panel: Random battle button created successfully")
-        except Exception as e:
-            logger.error(f"MainMenuWindow._create_battle_panel: Error creating random battle button: {e}")
-            # Simple fallback
-            ttk.Button(
-                battle_frame,
-                text="Random Battle",
-                command=self._random_battle
-            ).pack(pady=5, fill=tk.X)
-        
+        self.root.update_idletasks()  # Process pending events
+        random_btn = ttk.Button(
+            battle_frame,
+            text="Random Battle",
+            command=self._random_battle
+        )
+        random_btn.pack(pady=5, fill=tk.X)
+        logger.info("MainMenuWindow._create_battle_panel: Random battle button created successfully")
+
+        logger.info("MainMenuWindow._create_battle_panel: Creating endless battle button")
+        # Endless battle button
+        self.root.update_idletasks()  # Process pending events
+        endless_btn = ttk.Button(
+            battle_frame,
+            text="Endless Battle",
+            command=self._start_endless_battle
+        )
+        endless_btn.pack(pady=5, fill=tk.X)
+        logger.info("MainMenuWindow._create_battle_panel: Endless battle button created successfully")
+
+        # Story mode button - Temporarily disabled
+        logger.info("MainMenuWindow._create_battle_panel: Skipping story mode button to debug segfault")
+
         logger.info("MainMenuWindow._create_battle_panel: Battle panel creation complete")
     
     def _create_status_panel(self, parent):
@@ -394,15 +441,94 @@ class MainMenuWindow:
         status_label.grid(row=1, column=0, sticky=tk.W)
     
     def _load_characters(self):
-        """Load characters from database"""
+        """Load characters from database with AI generation progress dialog"""
         try:
             self.status_var.set("Loading characters...")
-            self.characters = self.db_manager.get_all_characters()
-            
+
+            # Load characters in a separate thread to avoid blocking UI
+            def load_in_thread():
+                try:
+                    # Progress dialog for AI generation
+                    progress_dialog = None
+
+                    def progress_callback(current, total, char_name, step):
+                        """Callback to update progress dialog"""
+                        nonlocal progress_dialog
+
+                        # Schedule UI updates on the main thread
+                        def update_ui():
+                            nonlocal progress_dialog
+                            # Show dialog on first call (ensure root window is ready)
+                            if progress_dialog is None and total > 0:
+                                try:
+                                    # Make sure the root window is fully initialized
+                                    self.root.update_idletasks()
+                                    progress_dialog = AIGenerationDialog(self.root)
+                                    progress_dialog.show(total)
+                                except Exception as e:
+                                    logger.warning(f"Failed to create progress dialog: {e}")
+                                    # Continue without dialog, just log
+                                    logger.info(f"AI Generation: {current}/{total} - {step}")
+                                    return
+
+                            # Update progress
+                            if progress_dialog:
+                                try:
+                                    progress_dialog.update_progress(current, total, char_name, step)
+                                except Exception as e:
+                                    logger.warning(f"Failed to update progress dialog: {e}")
+                            else:
+                                # Log progress if dialog unavailable
+                                logger.info(f"AI Generation: {current}/{total} - {step} - {char_name or ''}")
+
+                        # Execute UI update on main thread
+                        self.root.after(0, update_ui)
+
+                    # Load characters (with AI generation if needed)
+                    if isinstance(self.db_manager, SheetsManager):
+                        # Online mode - pass progress callback for AI generation
+                        characters = self.db_manager.get_all_characters(progress_callback=progress_callback)
+                    else:
+                        # Offline mode - no AI generation
+                        characters = self.db_manager.get_all_characters()
+
+                    # Schedule final UI update on main thread
+                    def finalize_ui():
+                        nonlocal progress_dialog
+
+                        # Close progress dialog if it was shown
+                        if progress_dialog:
+                            try:
+                                progress_dialog.close()
+                            except Exception as e:
+                                logger.warning(f"Failed to close progress dialog: {e}")
+
+                        # Update UI with loaded characters
+                        self._update_character_display(characters)
+
+                    self.root.after(0, finalize_ui)
+
+                except Exception as e:
+                    logger.error(f"Error in load thread: {e}")
+                    self.root.after(0, lambda: self.status_var.set(f"Error loading characters: {e}"))
+
+            # Start loading in background thread
+            threading.Thread(target=load_in_thread, daemon=True).start()
+
+        except Exception as e:
+            logger.error(f"Error loading characters: {e}")
+            self.status_var.set(f"Error loading characters: {e}")
+            messagebox.showerror("Error", f"Failed to load characters: {e}")
+
+    def _update_character_display(self, characters):
+        """Update character display on UI thread (called from main thread)"""
+        try:
+            self.characters = characters
+
             # Clear treeview
             for item in self.char_tree.get_children():
                 self.char_tree.delete(item)
-            
+
             # Populate treeview
             for char in self.characters:
                 win_rate = f"{char.win_rate:.1f}%" if char.battle_count > 0 else "N/A"
@@ -413,6 +539,7 @@ class MainMenuWindow:
                     char.defense,
                     char.speed,
                     char.magic,
+                    char.luck,
                     char.battle_count,
                     f"{char.win_count} ({win_rate})"
                 ))
@@ -483,13 +610,10 @@ class MainMenuWindow:
                 messagebox.showerror("Error", "Failed to find selected characters")
                 return
             
-            # Start battle in separate thread
+            # Start battle on main thread (macOS 15+ requirement for Pygame window creation)
             visual_mode = self.visual_mode_var.get()
-            threading.Thread(
-                target=self._run_battle,
-                args=(char1, char2, visual_mode),
-                daemon=True
-            ).start()
+            # Use after() to run on main thread without blocking
+            self.root.after(100, lambda: self._run_battle(char1, char2, visual_mode))
             
         except Exception as e:
             logger.error(f"Error starting battle: {e}")
@@ -541,7 +665,8 @@ class MainMenuWindow:
                     'f2_final_hp': battle.char2_final_hp,
                     'f1_damage_dealt': battle.char1_damage_dealt,
                     'f2_damage_dealt': battle.char2_damage_dealt,
-                    'result_type': battle.result_type
+                    'result_type': battle.result_type,
+                    'battle_log': battle.battle_log  # Add battle log
                 }
 
                 if self.db_manager.record_battle_history(battle_data):
@@ -578,9 +703,10 @@ class MainMenuWindow:
             ))
             
         except Exception as e:
-            logger.error(f"Error running battle: {e}")
-            self.status_var.set(f"Battle error: {e}")
-            self.root.after(500, lambda: messagebox.showerror("Battle Error", str(e)))
+            error_msg = str(e)
+            logger.error(f"Error running battle: {error_msg}")
+            self.status_var.set(f"Battle error: {error_msg}")
+            self.root.after(500, lambda msg=error_msg: messagebox.showerror("Battle Error", msg))
         finally:
             # Re-enable controls after battle
             pass
@@ -675,19 +801,49 @@ class MainMenuWindow:
             if len(self.characters) < 2:
                 messagebox.showwarning("Warning", "Need at least 2 characters for battle")
                 return
-            
+
             import random
             fighters = random.sample(self.characters, 2)
-            
+
             self.fighter1_var.set(fighters[0].name)
             self.fighter2_var.set(fighters[1].name)
-            
+
             self._start_battle()
-            
+
         except Exception as e:
             logger.error(f"Error starting random battle: {e}")
             messagebox.showerror("Error", f"Failed to start random battle: {e}")
-    
+
+    def _start_endless_battle(self):
+        """Start endless tournament-style battle"""
+        try:
+            if len(self.characters) < 2:
+                messagebox.showwarning("Warning", "Need at least 2 characters for endless battle")
+                return
+
+            # Apply latest settings to battle engine
+            try:
+                from src.services.settings_manager import settings_manager
+                settings_manager.apply_to_battle_engine(self.battle_engine)
+            except Exception as e:
+                logger.warning(f"Could not apply settings to battle engine: {e}")
+
+            # Start endless battle mode
+            result = self.endless_battle_engine.start_endless_battle()
+
+            if result is None:
+                messagebox.showerror("Error", "Failed to start endless battle mode")
+                return
+
+            logger.info(f"Endless battle started with champion: {result['champion'].name}")
+
+            # Open endless battle window
+            EndlessBattleWindow(self.root, self.endless_battle_engine, self.db_manager, self.visual_mode_var.get())
+
+        except Exception as e:
+            logger.error(f"Error starting endless battle: {e}")
+            messagebox.showerror("Error", f"Failed to start endless battle: {e}")
+
     def _show_statistics(self):
         """Show statistics window"""
         try:
@@ -713,7 +869,55 @@ class MainMenuWindow:
         except Exception as e:
             logger.error(f"Error showing settings: {e}")
             messagebox.showerror("Error", f"Failed to open settings: {e}")
-    
+
+    def _show_story_boss_manager(self):
+        """Show story boss management window"""
+        try:
+            from src.ui.story_boss_manager import StoryBossManagerWindow
+            StoryBossManagerWindow(self.root, self.db_manager)
+        except Exception as e:
+            logger.error(f"Error opening story boss manager: {e}")
+            messagebox.showerror("Error", f"Failed to open story boss manager: {e}")
+
+    def _start_story_mode(self):
+        """Start story mode"""
+        try:
+            if len(self.characters) == 0:
+                messagebox.showwarning("Warning", "No characters available for story mode")
+                return
+
+            # Character selection dialog
+            StoryModeCharacterSelectionWindow(self.root, self.characters, self.db_manager, self.visual_mode_var.get())
+
+        except Exception as e:
+            logger.error(f"Error starting story mode: {e}")
+            messagebox.showerror("Error", f"Failed to start story mode: {e}")
+
+    def _start_auto_story_mode(self):
+        """Start auto story mode (runs story mode for all characters automatically)"""
+        try:
+            # Initialize story mode engine
+            from src.services.story_mode_engine import StoryModeEngine
+            story_engine = StoryModeEngine(self.db_manager)
+
+            # Start auto story mode
+            result = story_engine.start_auto_story_mode(visual_mode=self.visual_mode_var.get())
+
+            if not result:
+                messagebox.showwarning("Warning", "Failed to start auto story mode")
+                return
+
+            if result['status'] == 'waiting':
+                messagebox.showinfo("Auto Story Mode", result.get('message', '新しいキャラクターを待機中...'))
+                return
+
+            # Create auto story mode window
+            AutoStoryModeWindow(self.root, story_engine, self.visual_mode_var.get())
+
+        except Exception as e:
+            logger.error(f"Error starting story mode: {e}")
+            messagebox.showerror("Error", f"Failed to start story mode: {e}")
+
     def _test_ai_connection(self):
         """Test AI connection"""
         try:
@@ -747,17 +951,17 @@ class CharacterRegistrationDialog:
         self.parent = parent
         self.main_window = main_window
         self.character = None
-        
+
         # Create dialog
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("Character Registration")
         self.dialog.geometry("600x500")
         self.dialog.transient(parent)
         self.dialog.grab_set()
-        
+
         # Center dialog
         self.dialog.geometry("+%d+%d" % (parent.winfo_rootx() + 100, parent.winfo_rooty() + 50))
-        
+
         self._create_widgets()
     
     def _create_widgets(self):
@@ -804,6 +1008,7 @@ class CharacterRegistrationDialog:
         self.defense_var = tk.StringVar(value="50")
         self.speed_var = tk.StringVar(value="50")
         self.magic_var = tk.StringVar(value="50")
+        self.luck_var = tk.StringVar(value="50")
 
         ttk.Label(stats_frame, text="HP:").grid(row=0, column=0, sticky=tk.W)
         ttk.Entry(stats_frame, textvariable=self.hp_var, width=10).grid(row=0, column=1, sticky=tk.W, padx=(10, 20))
@@ -817,6 +1022,16 @@ class CharacterRegistrationDialog:
 
         ttk.Label(stats_frame, text="Magic:").grid(row=2, column=0, sticky=tk.W)
         ttk.Entry(stats_frame, textvariable=self.magic_var, width=10).grid(row=2, column=1, sticky=tk.W, padx=(10, 20))
+        ttk.Label(stats_frame, text="Luck:").grid(row=2, column=2, sticky=tk.W)
+        ttk.Entry(stats_frame, textvariable=self.luck_var, width=10).grid(row=2, column=3, sticky=tk.W, padx=(10, 0))
+
+        # Total stats label
+        self.total_stats_label = ttk.Label(stats_frame, text="Total: 300/350", foreground="blue")
+        self.total_stats_label.grid(row=3, column=0, columnspan=4, sticky=tk.W, pady=(5, 0))
+
+        # Bind stat changes to update total
+        for var in [self.hp_var, self.attack_var, self.defense_var, self.speed_var, self.magic_var, self.luck_var]:
+            var.trace('w', self._update_total_stats)
         
         # Description (supports Japanese and English)
         ttk.Label(details_frame, text="Description (説明):").grid(row=2, column=0, sticky=(tk.W, tk.N), pady=(10, 0))
@@ -895,6 +1110,26 @@ class CharacterRegistrationDialog:
             messagebox.showerror("Error", f"Failed to analyze image: {e}")
             self._reset_cursor()
     
+    def _update_total_stats(self, *args):
+        """Update total stats display"""
+        try:
+            total = 0
+            for var in [self.hp_var, self.attack_var, self.defense_var, self.speed_var, self.magic_var, self.luck_var]:
+                try:
+                    total += int(var.get())
+                except:
+                    pass
+
+            # Update label color based on total
+            if total > 350:
+                self.total_stats_label.config(text=f"Total: {total}/350", foreground="red")
+            elif total == 350:
+                self.total_stats_label.config(text=f"Total: {total}/350", foreground="green")
+            else:
+                self.total_stats_label.config(text=f"Total: {total}/350", foreground="blue")
+        except Exception as e:
+            logger.error(f"Error updating total stats: {e}")
+
     def _update_stats(self, stats):
         """Update stats display"""
         try:
@@ -903,12 +1138,13 @@ class CharacterRegistrationDialog:
             self.defense_var.set(str(stats.defense))
             self.speed_var.set(str(stats.speed))
             self.magic_var.set(str(stats.magic))
-            
+            self.luck_var.set(str(stats.luck))
+
             self.description_text.delete(1.0, tk.END)
             self.description_text.insert(tk.END, stats.description)
-            
+
             messagebox.showinfo("Success", "Image analysis completed!")
-            
+
         except Exception as e:
             logger.error(f"Error updating stats: {e}")
             messagebox.showerror("Error", f"Failed to update stats: {e}")
@@ -941,10 +1177,32 @@ class CharacterRegistrationDialog:
                 defense = int(self.defense_var.get())
                 speed = int(self.speed_var.get())
                 magic = int(self.magic_var.get())
+                luck = int(self.luck_var.get())
 
-                # Validate stat ranges (1-100)
-                if not all(1 <= stat <= 100 for stat in [hp, attack, defense, speed, magic]):
-                    messagebox.showwarning("Warning", "All stats must be between 1 and 100")
+                # Validate stat ranges (each stat has different range)
+                if not (10 <= hp <= 200):
+                    messagebox.showwarning("Warning", "HP must be between 10 and 200")
+                    return
+                if not (10 <= attack <= 150):
+                    messagebox.showwarning("Warning", "Attack must be between 10 and 150")
+                    return
+                if not (10 <= defense <= 100):
+                    messagebox.showwarning("Warning", "Defense must be between 10 and 100")
+                    return
+                if not (10 <= speed <= 100):
+                    messagebox.showwarning("Warning", "Speed must be between 10 and 100")
+                    return
+                if not (10 <= magic <= 100):
+                    messagebox.showwarning("Warning", "Magic must be between 10 and 100")
+                    return
+                if not (0 <= luck <= 100):
+                    messagebox.showwarning("Warning", "Luck must be between 0 and 100")
+                    return
+
+                # Check total stats limit
+                total_stats = hp + attack + defense + speed + magic + luck
+                if total_stats > 350:
+                    messagebox.showwarning("Warning", f"Total stats ({total_stats}) exceeds maximum allowed (350)")
                     return
 
             except ValueError:
@@ -968,11 +1226,11 @@ class CharacterRegistrationDialog:
                         str(Settings.SPRITES_DIR),
                         name
                     )
-                    
+
                     if not success:
                         self.dialog.after(0, lambda: messagebox.showerror("Error", f"Image processing failed: {message}"))
                         return
-                    
+
                     # Create character
                     character = Character(
                         name=name,
@@ -981,6 +1239,7 @@ class CharacterRegistrationDialog:
                         defense=defense,
                         speed=speed,
                         magic=magic,
+                        luck=luck,
                         description=description,
                         image_path=image_path,
                         sprite_path=sprite_path
@@ -995,7 +1254,8 @@ class CharacterRegistrationDialog:
                         self.dialog.after(0, lambda: messagebox.showerror("Error", "Failed to save character"))
                         
                 except Exception as e:
-                    self.dialog.after(0, lambda: messagebox.showerror("Error", f"Registration failed: {e}"))
+                    error_msg = f"Registration failed: {e}"
+                    self.dialog.after(0, lambda msg=error_msg: messagebox.showerror("Error", msg))
                 finally:
                     self.dialog.after(0, lambda: self._reset_cursor())
             
@@ -1023,11 +1283,11 @@ class StatsWindow:
         self.window.title("📊 統計情報")
         self.window.geometry("500x600")
         self.window.resizable(False, False)
-        
+
         # Center the window
         self.window.transient(parent)
         self.window.grab_set()
-        
+
         self._create_widgets()
     
     def _create_widgets(self):
@@ -1580,7 +1840,10 @@ class BattleHistoryWindow:
         # Battle list with scrollbar
         list_frame = ttk.Frame(main_frame)
         list_frame.pack(fill=tk.BOTH, expand=True)
-        
+
+        # Initialize fallback flag BEFORE creating widgets
+        self._use_listbox_fallback = False
+
         # Safer Treeview initialization to prevent segfault
         try:
             # Use more basic column configuration to avoid memory issues
@@ -1627,9 +1890,6 @@ class BattleHistoryWindow:
             # Fallback: create minimal listbox if Treeview fails
             self.tree = tk.Listbox(list_frame, height=15)
             self._use_listbox_fallback = True
-        
-        # Initialize fallback flag
-        self._use_listbox_fallback = getattr(self, '_use_listbox_fallback', False)
 
         # Scrollbars with error handling
         try:
@@ -1694,22 +1954,24 @@ class BattleHistoryWindow:
             except Exception as clear_e:
                 logger.warning(f"Error clearing tree: {clear_e}")
 
+            # Optimize: Load all characters once and cache them
+            character_cache = {}
+            try:
+                all_characters = self.db_manager.get_all_characters()
+                character_cache = {char.id: char.name for char in all_characters}
+                logger.info(f"Cached {len(character_cache)} character names for battle history")
+            except Exception as cache_e:
+                logger.warning(f"Error caching characters: {cache_e}")
+
             # Process battles with more conservative memory usage
             processed_count = 0
             for battle in battles:
                 if processed_count >= 50:  # Safety limit
                     break
                 try:
-                    # Get character names safely with simplified logic
-                    char1_name = "Unknown"
-                    char2_name = "Unknown"
-                    try:
-                        char1 = self.db_manager.get_character(battle.character1_id)
-                        char2 = self.db_manager.get_character(battle.character2_id)
-                        char1_name = char1.name if char1 else "Unknown"
-                        char2_name = char2.name if char2 else "Unknown"
-                    except Exception as char_e:
-                        logger.warning(f"Error getting character data: {char_e}")
+                    # Get character names from cache (much faster!)
+                    char1_name = character_cache.get(battle.character1_id, "Unknown")
+                    char2_name = character_cache.get(battle.character2_id, "Unknown")
 
                     # Determine winner name safely
                     winner_name = "Draw"  # Use English to avoid encoding issues
@@ -1956,14 +2218,14 @@ class SettingsWindow:
         self.window.title("⚙️ 設定")
         self.window.geometry("500x600")
         self.window.resizable(False, False)
-        
+
         # Center the window
         self.window.transient(parent)
         self.window.grab_set()
-        
+
         # Settings variables
         self.settings = self._load_settings()
-        
+
         self._create_widgets()
     
     def _load_settings(self):
@@ -2020,9 +2282,9 @@ class SettingsWindow:
         speed_frame = ttk.Frame(battle_frame)
         speed_frame.pack(fill=tk.X, pady=5)
         ttk.Label(speed_frame, text="バトル速度:").pack(side=tk.LEFT)
-        
+
         self.battle_speed_var = tk.DoubleVar(value=self.settings['battle_speed'])
-        speed_scale = tk.Scale(speed_frame, from_=0.01, to=3.0, resolution=0.01, 
+        speed_scale = tk.Scale(speed_frame, from_=0.01, to=1.0, resolution=0.01,
                               orient=tk.HORIZONTAL, variable=self.battle_speed_var)
         speed_scale.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 0))
         
@@ -2238,7 +2500,617 @@ class SettingsWindow:
                                    "設定の保存に失敗しました。")
             
             self.window.destroy()
-            
+
         except Exception as e:
             messagebox.showerror("エラー", f"設定の保存に失敗しました: {e}")
-            logger.error(f"Error saving settings: {e}")
+
+
+class StoryModeCharacterSelectionWindow:
+    """Character selection window for story mode"""
+
+    def __init__(self, parent, characters, db_manager, visual_mode=True):
+        self.parent = parent
+        self.characters = characters
+        self.db_manager = db_manager
+        self.visual_mode = visual_mode
+        self.selected_character = None
+
+        self.window = tk.Toplevel(parent)
+        self.window.title("ストーリーモード - キャラクター選択")
+        self.window.geometry("500x600")
+
+        self._create_ui()
+
+    def _create_ui(self):
+        """Create UI"""
+        main_frame = ttk.Frame(self.window, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(main_frame, text="ストーリーモードで使用するキャラクターを選択", font=("", 12, "bold")).pack(pady=(0, 10))
+
+        # Character list
+        list_frame = ttk.Frame(main_frame)
+        list_frame.pack(fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.char_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, font=("", 11))
+        self.char_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.char_listbox.yview)
+
+        for char in self.characters:
+            self.char_listbox.insert(tk.END, f"{char.name} (HP:{char.hp} ATK:{char.attack})")
+
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=10)
+
+        ttk.Button(button_frame, text="開始", command=self._start).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="キャンセル", command=self.window.destroy).pack(side=tk.LEFT, padx=5)
+
+    def _start(self):
+        """Start story mode with selected character"""
+        selection = self.char_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("警告", "キャラクターを選択してください")
+            return
+
+        self.selected_character = self.characters[selection[0]]
+        self.window.destroy()
+
+        # Open story mode window
+        StoryModeWindow(self.parent, self.selected_character, self.db_manager, self.visual_mode)
+
+
+class StoryModeWindow:
+    """Story mode battle window"""
+
+    def __init__(self, parent, player_character, db_manager, visual_mode=True):
+        self.parent = parent
+        self.player_character = player_character
+        self.db_manager = db_manager
+        self.visual_mode = visual_mode
+
+        # Initialize story mode engine
+        from src.services.story_mode_engine import StoryModeEngine
+        self.story_engine = StoryModeEngine(db_manager)
+        self.story_engine.load_bosses()
+
+        # Get player progress
+        self.progress = self.story_engine.get_player_progress(player_character.id)
+
+        self.window = tk.Toplevel(parent)
+        self.window.title(f"ストーリーモード - {player_character.name}")
+        self.window.geometry("700x500")
+
+        self._create_ui()
+        self._update_status()
+
+    def _create_ui(self):
+        """Create UI"""
+        main_frame = ttk.Frame(self.window, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        title_label = ttk.Label(main_frame, text=f"ストーリーモード", font=("", 16, "bold"))
+        title_label.pack(pady=(0, 10))
+
+        # Player info
+        player_frame = ttk.LabelFrame(main_frame, text="プレイヤー", padding=10)
+        player_frame.pack(fill=tk.X, pady=5)
+
+        player_info = f"{self.player_character.name} (HP:{self.player_character.hp} ATK:{self.player_character.attack} DEF:{self.player_character.defense})"
+        ttk.Label(player_frame, text=player_info, font=("", 12)).pack()
+
+        # Progress info
+        progress_frame = ttk.LabelFrame(main_frame, text="進行状況", padding=10)
+        progress_frame.pack(fill=tk.X, pady=5)
+
+        self.progress_label = ttk.Label(progress_frame, text="", font=("", 11))
+        self.progress_label.pack()
+
+        # Boss info
+        boss_frame = ttk.LabelFrame(main_frame, text="次のボス", padding=10)
+        boss_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        self.boss_label = ttk.Label(boss_frame, text="", font=("", 12))
+        self.boss_label.pack(pady=5)
+
+        self.boss_stats_label = ttk.Label(boss_frame, text="", font=("", 10))
+        self.boss_stats_label.pack()
+
+        # Buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=10)
+
+        self.battle_button = ttk.Button(button_frame, text="バトル開始", command=self._start_battle)
+        self.battle_button.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(button_frame, text="進行状況リセット", command=self._reset_progress).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="閉じる", command=self.window.destroy).pack(side=tk.LEFT, padx=5)
+
+    def _update_status(self):
+        """Update status display"""
+        # Update progress
+        victories_text = ", ".join([f"Lv{v}" for v in self.progress.victories]) if self.progress.victories else "なし"
+        progress_text = f"現在: Lv{self.progress.current_level} | 撃破: {victories_text} | 挑戦回数: {self.progress.attempts}"
+        self.progress_label.config(text=progress_text)
+
+        # Update boss info
+        if self.progress.completed:
+            self.boss_label.config(text="🎉 ストーリーモードクリア!")
+            self.boss_stats_label.config(text="")
+            self.battle_button.config(state=tk.DISABLED)
+        else:
+            next_level = self.progress.current_level
+            boss = self.story_engine.get_boss(next_level)
+            if boss:
+                self.boss_label.config(text=f"Lv{boss.level}: {boss.name}")
+                boss_stats = f"HP:{boss.hp} ATK:{boss.attack} DEF:{boss.defense} SPD:{boss.speed} MAG:{boss.magic}"
+                self.boss_stats_label.config(text=boss_stats)
+                self.battle_button.config(state=tk.NORMAL)
+            else:
+                self.boss_label.config(text=f"Lv{next_level} ボスが設定されていません")
+                self.boss_stats_label.config(text="")
+                self.battle_button.config(state=tk.DISABLED)
+
+    def _start_battle(self):
+        """Start story mode battles (run until completion or defeat)"""
+        try:
+            self.battle_button.config(state=tk.DISABLED)
+            self._run_story_battles()
+        except Exception as e:
+            logger.error(f"Error in story mode: {e}")
+            messagebox.showerror("エラー", f"ストーリーモードエラー: {e}")
+            self.battle_button.config(state=tk.NORMAL)
+
+    def _run_story_battles(self):
+        """Run battles continuously until completion or defeat"""
+        try:
+            while not self.progress.completed:
+                next_level = self.progress.current_level
+                boss = self.story_engine.get_boss(next_level)
+
+                if not boss:
+                    messagebox.showerror("エラー", f"Lv{next_level}のボスが設定されていません")
+                    break
+
+                # Show challenge confirmation
+                challenge_window = tk.Toplevel(self.window)
+                challenge_window.title("ストーリーモード")
+                challenge_window.geometry("400x200")
+                challenge_window.transient(self.window)
+                challenge_window.grab_set()
+
+                # Center the window
+                challenge_window.update_idletasks()
+                x = (challenge_window.winfo_screenwidth() // 2) - (400 // 2)
+                y = (challenge_window.winfo_screenheight() // 2) - (200 // 2)
+                challenge_window.geometry(f'400x200+{x}+{y}')
+
+                frame = ttk.Frame(challenge_window, padding=20)
+                frame.pack(fill=tk.BOTH, expand=True)
+
+                ttk.Label(frame, text=f"Level {next_level}", font=("", 24, "bold")).pack(pady=10)
+                ttk.Label(frame, text=f"{boss.name}", font=("", 16)).pack(pady=5)
+                ttk.Label(frame, text="挑戦します！", font=("", 14)).pack(pady=10)
+
+                challenge_window.after(2000, challenge_window.destroy)
+                challenge_window.wait_window()
+
+                # Start battle
+                self.story_engine.start_battle(self.player_character, next_level)
+
+                # Execute battle
+                result = self.story_engine.execute_battle(visual_mode=self.visual_mode)
+
+                if not result:
+                    break
+
+                battle = result['battle']
+                winner = result['winner']
+                victory = (winner.id == self.player_character.id)
+
+                # Update progress
+                self.story_engine.update_progress(self.player_character.id, next_level, victory)
+
+                # Reload progress
+                self.progress = self.story_engine.get_player_progress(self.player_character.id)
+
+                # Check result
+                if not victory:
+                    messagebox.showinfo("敗北", f"Lv{next_level} {boss.name}に敗れました...\n\nストーリーモード終了")
+                    break
+
+                # Check if completed
+                if self.progress.completed:
+                    messagebox.showinfo("クリア!", f"Lv{next_level} {boss.name}を倒しました!\n\nストーリーモードクリア!")
+                    break
+
+            # Update display
+            self._update_status()
+            self.battle_button.config(state=tk.NORMAL)
+
+        except Exception as e:
+            logger.error(f"Error in story battles: {e}")
+            messagebox.showerror("エラー", f"バトルエラー: {e}")
+            self.battle_button.config(state=tk.NORMAL)
+
+    def _reset_progress(self):
+        """Reset story mode progress"""
+        if messagebox.askyesno("確認", "進行状況をリセットしますか?"):
+            try:
+                self.story_engine.reset_progress(self.player_character.id)
+                self.progress = self.story_engine.get_player_progress(self.player_character.id)
+                self._update_status()
+                messagebox.showinfo("完了", "進行状況をリセットしました")
+            except Exception as e:
+                logger.error(f"Error resetting progress: {e}")
+                messagebox.showerror("エラー", f"リセットエラー: {e}")
+
+
+class EndlessBattleWindow:
+    """Window for endless tournament-style battles"""
+
+    def __init__(self, parent, endless_engine, db_manager, visual_mode: bool = True):
+        self.endless_engine = endless_engine
+        self.db_manager = db_manager
+        self.visual_mode = visual_mode
+        self.is_running = True
+        self.check_interval = 10000  # Check for new characters every 10 seconds
+
+        self.window = tk.Toplevel(parent)
+        self.window.title("♾️ エンドレスバトル")
+        self.window.geometry("600x500")
+        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Center the window
+        self.window.transient(parent)
+
+        self._create_widgets()
+        self._start_battle_loop()
+
+    def _create_widgets(self):
+        """Create endless battle window widgets"""
+        main_frame = ttk.Frame(self.window, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        title_label = ttk.Label(main_frame, text="♾️ エンドレスバトル", font=("Arial", 18, "bold"))
+        title_label.pack(pady=(0, 20))
+
+        # Champion info frame
+        self.champion_frame = ttk.LabelFrame(main_frame, text="🏆 現在のチャンピオン", padding=10)
+        self.champion_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.champion_name_var = tk.StringVar()
+        self.champion_wins_var = tk.StringVar()
+
+        ttk.Label(self.champion_frame, textvariable=self.champion_name_var, font=("Arial", 14, "bold")).pack()
+        ttk.Label(self.champion_frame, textvariable=self.champion_wins_var, font=("Arial", 11)).pack()
+
+        # Status frame
+        status_frame = ttk.LabelFrame(main_frame, text="📊 ステータス", padding=10)
+        status_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.battle_count_var = tk.StringVar()
+        self.remaining_var = tk.StringVar()
+        self.status_var = tk.StringVar()
+
+        ttk.Label(status_frame, textvariable=self.battle_count_var).pack(anchor=tk.W)
+        ttk.Label(status_frame, textvariable=self.remaining_var).pack(anchor=tk.W)
+        ttk.Label(status_frame, textvariable=self.status_var, font=("Arial", 10, "italic")).pack(anchor=tk.W, pady=(10, 0))
+
+        # Battle log
+        log_frame = ttk.LabelFrame(main_frame, text="📝 バトルログ", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(log_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.log_text = tk.Text(log_frame, height=10, wrap=tk.WORD, yscrollcommand=scrollbar.set)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.log_text.yview)
+
+        # Control buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X)
+
+        self.pause_button = ttk.Button(button_frame, text="⏸️ 一時停止", command=self._toggle_pause)
+        self.pause_button.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(button_frame, text="❌ 終了", command=self._on_close).pack(side=tk.LEFT, padx=5)
+
+    def _start_battle_loop(self):
+        """Start the endless battle loop"""
+        if not self.is_running:
+            return
+
+        try:
+            # Run next battle
+            result = self.endless_engine.run_next_battle(self.visual_mode)
+
+            if result is None:
+                self._log("エラー: バトルを実行できませんでした")
+                return
+
+            if result['status'] == 'waiting':
+                # No challengers available, waiting for new characters
+                self._update_waiting_state(result)
+                # Schedule next check
+                self.window.after(self.check_interval, self._start_battle_loop)
+
+            elif result['status'] == 'battle_complete':
+                # Battle completed, save and continue
+                self._update_battle_complete(result)
+
+                # Save battle to database
+                battle = result['battle']
+                if self.db_manager.save_battle(battle):
+                    logger.info(f"Endless battle saved: {battle.id}")
+
+                # Record battle history to Google Sheets (online mode only)
+                if isinstance(self.db_manager, SheetsManager) and self.db_manager.online_mode:
+                    battle_data = {
+                        'battle_id': battle.id,
+                        'fighter1_id': battle.character1_id,
+                        'fighter2_id': battle.character2_id,
+                        'fighter1_name': result.get('fighter1_name', ''),
+                        'fighter2_name': result.get('fighter2_name', ''),
+                        'winner_id': battle.winner_id,
+                        'winner_name': result.get('winner_name', ''),
+                        'total_turns': len(battle.turns),
+                        'duration': battle.duration,
+                        'f1_final_hp': battle.char1_final_hp,
+                        'f2_final_hp': battle.char2_final_hp,
+                        'f1_damage_dealt': battle.char1_damage_dealt,
+                        'f2_damage_dealt': battle.char2_damage_dealt,
+                        'result_type': battle.result_type,
+                        'battle_log': battle.battle_log
+                    }
+
+                    if self.db_manager.record_battle_history(battle_data):
+                        logger.info("Endless battle history recorded to Google Sheets")
+                    else:
+                        logger.warning("Failed to record endless battle history")
+
+                    # Update rankings after battle
+                    if self.db_manager.update_rankings():
+                        logger.info("Rankings updated successfully")
+                    else:
+                        logger.warning("Failed to update rankings")
+
+                # Schedule next battle
+                self.window.after(1000, self._start_battle_loop)
+
+        except Exception as e:
+            logger.error(f"Error in endless battle loop: {e}")
+            self._log(f"エラー: {e}")
+            self.window.after(self.check_interval, self._start_battle_loop)
+
+    def _update_waiting_state(self, result):
+        """Update UI for waiting state"""
+        champion = result['champion']
+        self.champion_name_var.set(champion.name)
+        self.champion_wins_var.set(f"連勝数: {result['champion_wins']}")
+
+        status = self.endless_engine.get_status()
+        self.battle_count_var.set(f"総バトル数: {status['total_battles']}")
+        self.remaining_var.set(f"待機中の挑戦者: 0")
+        self.status_var.set(f"新しい挑戦者を待っています... (次回チェック: {self.check_interval // 1000}秒後)")
+
+        # Log with timestamp
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        self._log(f"[{timestamp}] {result['message']}")
+
+    def _update_battle_complete(self, result):
+        """Update UI after battle completion"""
+        champion = result['champion']
+        battle = result['battle']
+
+        self.champion_name_var.set(champion.name)
+        self.champion_wins_var.set(f"連勝数: {result['champion_wins']}")
+
+        self.battle_count_var.set(f"総バトル数: {result['battle_count']}")
+        self.remaining_var.set(f"待機中の挑戦者: {result['remaining_count']}")
+
+        # Log battle result
+        if result['winner']:
+            winner_name = result['winner'].name
+            loser_name = result['loser'].name
+
+            if result['winner'] == champion:
+                msg = f"🏆 {winner_name} が {loser_name} を倒しました！チャンピオン防衛成功！"
+                self.status_var.set("チャンピオンが勝利！")
+            else:
+                msg = f"👑 新チャンピオン誕生！{winner_name} が {loser_name} を倒しました！"
+                self.status_var.set("新チャンピオン誕生！")
+        else:
+            msg = "引き分け"
+            self.status_var.set("引き分け")
+
+        self._log(msg)
+
+    def _log(self, message: str):
+        """Add message to battle log"""
+        self.log_text.insert(tk.END, f"{message}\n")
+        self.log_text.see(tk.END)
+
+    def _toggle_pause(self):
+        """Toggle pause state"""
+        self.is_running = not self.is_running
+
+        if self.is_running:
+            self.pause_button.config(text="⏸️ 一時停止")
+            self._log("バトル再開")
+            self._start_battle_loop()
+        else:
+            self.pause_button.config(text="▶️ 再開")
+            self._log("バトル一時停止")
+
+    def _on_close(self):
+        """Handle window close"""
+        if messagebox.askyesno("確認", "エンドレスバトルを終了しますか？"):
+            self.is_running = False
+            result = self.endless_engine.stop()
+
+            # Show final stats
+            final_msg = f"エンドレスバトル終了\n総バトル数: {result['total_battles']}\n最終チャンピオン: {result['final_champion'].name}\nチャンピオン連勝数: {result['champion_wins']}"
+            messagebox.showinfo("バトル終了", final_msg)
+
+            self.window.destroy()
+
+
+class AutoStoryModeWindow:
+    """Auto Story Mode execution window"""
+
+    def __init__(self, parent, story_engine, visual_mode: bool = False):
+        self.parent = parent
+        self.story_engine = story_engine
+        self.visual_mode = visual_mode
+        self.is_running = True
+
+        self.window = tk.Toplevel(parent)
+        self.window.title("自動ストーリーモード")
+        self.window.geometry("800x600")
+        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._create_ui()
+        self._start_auto_battles()
+
+    def _create_ui(self):
+        """Create UI components"""
+        main_frame = ttk.Frame(self.window, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Title
+        title_label = ttk.Label(main_frame, text="自動ストーリーモード", font=("", 16, "bold"))
+        title_label.pack(pady=(0, 10))
+
+        # Status frame
+        status_frame = ttk.LabelFrame(main_frame, text="現在の状態", padding=10)
+        status_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.current_char_label = ttk.Label(status_frame, text="キャラクター: ---", font=("", 12))
+        self.current_char_label.pack(anchor=tk.W)
+
+        self.current_boss_label = ttk.Label(status_frame, text="ボス: ---", font=("", 12))
+        self.current_boss_label.pack(anchor=tk.W)
+
+        self.status_label = ttk.Label(status_frame, text="状態: 準備中...", font=("", 12))
+        self.status_label.pack(anchor=tk.W)
+
+        # Progress text
+        log_frame = ttk.LabelFrame(main_frame, text="進行状況", padding=10)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.log_text = tk.Text(log_frame, height=20, state=tk.DISABLED)
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text.config(yscrollcommand=scrollbar.set)
+
+        # Control buttons
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X)
+
+        self.stop_button = ttk.Button(button_frame, text="停止", command=self._stop_auto_mode)
+        self.stop_button.pack(side=tk.RIGHT)
+
+    def _log(self, message: str):
+        """Add message to log"""
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.insert(tk.END, f"{message}\n")
+        self.log_text.see(tk.END)
+        self.log_text.config(state=tk.DISABLED)
+        self.window.update()
+
+    def _start_auto_battles(self):
+        """Start auto battle loop"""
+        self._log("自動ストーリーモード開始")
+        self.window.after(100, self._run_next_battle)
+
+    def _run_next_battle(self):
+        """Run next battle in queue"""
+        if not self.is_running:
+            return
+
+        try:
+            result = self.story_engine.run_next_story_battle(visual_mode=self.visual_mode)
+
+            if not result:
+                self._log("エラー: バトルの実行に失敗しました")
+                self.is_running = False
+                return
+
+            status = result['status']
+
+            if status == 'waiting':
+                self.status_label.config(text="状態: 新しいキャラクターを待機中...")
+                self._log(result.get('message', '新しいキャラクターを待機中...'))
+                # Wait and check again
+                self.window.after(10000, self._run_next_battle)
+                return
+
+            elif status == 'completed':
+                char = result['character']
+                self._log(f"✓ {char.name} がストーリーモードをクリアしました！")
+                self._log(f"  → エンドレスモードへのアクセスが許可されました")
+                self.current_char_label.config(text=f"キャラクター: {char.name} (クリア!)")
+
+                # Continue to next character
+                self.window.after(2000, self._run_next_battle)
+                return
+
+            elif status == 'victory':
+                char = result['character']
+                boss_level = result['boss_level']
+                next_level = result['next_boss_level']
+                self._log(f"✓ {char.name} がBoss Lv{boss_level}を倒しました")
+                self.current_char_label.config(text=f"キャラクター: {char.name}")
+                self.current_boss_label.config(text=f"次のボス: Lv{next_level}")
+                self.status_label.config(text=f"状態: Lv{next_level}に挑戦中...")
+
+                # Continue to next boss
+                self.window.after(1000, self._run_next_battle)
+                return
+
+            elif status == 'defeated':
+                char = result['character']
+                boss_level = result['boss_level']
+                self._log(f"✗ {char.name} はBoss Lv{boss_level}に敗北しました")
+                self.current_char_label.config(text=f"キャラクター: --- (次へ)")
+
+                # Continue to next character
+                self.window.after(2000, self._run_next_battle)
+                return
+
+        except Exception as e:
+            logger.error(f"Error in auto story mode: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self._log(f"エラー: {e}")
+            self.is_running = False
+
+    def _stop_auto_mode(self):
+        """Stop auto story mode"""
+        if messagebox.askyesno("確認", "自動ストーリーモードを停止しますか？"):
+            self.is_running = False
+            self.story_engine.stop_auto_story_mode()
+            self._log("自動ストーリーモード停止")
+            self.status_label.config(text="状態: 停止")
+            self.stop_button.config(state=tk.DISABLED)
+
+    def _on_close(self):
+        """Handle window close"""
+        if self.is_running:
+            if messagebox.askyesno("確認", "自動ストーリーモードを終了しますか？"):
+                self.story_engine.stop_auto_story_mode()
+                self.window.destroy()
+        else:
+            self.window.destroy()

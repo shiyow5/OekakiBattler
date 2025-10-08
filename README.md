@@ -13,6 +13,8 @@
 - 🎨 **手描きキャラクター取り込み**: スキャンまたは写真撮影で簡単にデジタル化
 - 🤖 **AI自動ステータス生成**: Google Gemini AIがキャラクターの見た目を分析
 - ⚔️ **自動バトルシステム**: Pygameベースのリアルタイム戦闘表示
+- 📖 **ストーリーモード**: Lv1～Lv5のボスを順番に倒してクリアを目指す
+- ♾️ **エンドレスバトルモード**: トーナメント形式の勝ち抜き戦、新キャラ自動検出
 - 📊 **詳細統計管理**: 戦績、勝率、キャラクター性能の追跡
 - 🎲 **ランダムマッチ**: 自動でキャラクターをマッチング
 - 💾 **データ永続化**: Google Spreadsheetsによるクラウドベースのデータ管理
@@ -165,7 +167,7 @@ python main.py
 
 ### Google Spreadsheet構造
 
-アプリケーションが自動的に3つのワークシートを作成します：
+アプリケーションが自動的に5つのワークシートを作成します：
 
 #### 1. Characters（キャラクターデータ）
 
@@ -175,16 +177,19 @@ python main.py
 | B | Name | キャラクター名 |
 | C | Image URL | 元画像のURL（Google Driveなど） |
 | D | Sprite URL | 処理済みスプライトのURL |
-| E | HP | 体力値（50-150） |
-| F | Attack | 攻撃力（30-120） |
-| G | Defense | 防御力（20-100） |
-| H | Speed | 素早さ（40-130） |
+| E | HP | 体力値（10-200） |
+| F | Attack | 攻撃力（10-150） |
+| G | Defense | 防御力（10-100） |
+| H | Speed | 素早さ（10-100） |
 | I | Magic | 魔法力（10-100） |
-| J | Description | キャラクター説明 |
-| K | Created At | 作成日時（ISO形式） |
-| L | Wins | 勝利数 |
-| M | Losses | 敗北数 |
-| N | Draws | 引き分け数 |
+| J | Luck | 運（0-100）※相手の命中率低下・自分のクリティカル率上昇 |
+| K | Description | キャラクター説明 |
+| L | Created At | 作成日時（ISO形式） |
+| M | Wins | 勝利数 |
+| N | Losses | 敗北数 |
+| O | Draws | 引き分け数 |
+
+**ステータス合計の上限**: 350
 
 #### 2. BattleHistory（バトル履歴）
 
@@ -224,6 +229,39 @@ python main.py
 | H | Win Rate (%) | 勝率（%） |
 | I | Avg Damage Dealt | 平均与ダメージ |
 | J | Rating | レーティング（勝利×3＋引き分け） |
+
+#### 4. StoryBosses（ストーリーボス）
+
+ストーリーモード用のボスキャラクター情報：
+
+| 列 | 項目 | 説明 |
+|---|---|---|
+| A | Level | ボスレベル（1-5） |
+| B | Name | ボス名 |
+| C | HP | 体力値（10-300） |
+| D | Attack | 攻撃力（10-200） |
+| E | Defense | 防御力（10-150） |
+| F | Speed | 素早さ（10-150） |
+| G | Magic | 魔法力（10-150） |
+| H | Luck | 運（0-100） |
+| I | Description | ボスの説明 |
+| J | Image URL | 元画像のURL |
+| K | Sprite URL | スプライトのURL |
+
+**ボスステータス合計の上限**: 500
+
+#### 5. StoryProgress（ストーリー進行状況）
+
+各プレイヤーのストーリーモード進捗：
+
+| 列 | 項目 | 説明 |
+|---|---|---|
+| A | Character ID | プレイヤーキャラクターのID |
+| B | Current Level | 現在のレベル（1-5） |
+| C | Completed | クリア済みかどうか（TRUE/FALSE） |
+| D | Victories | 撃破済みボスレベル（カンマ区切り） |
+| E | Attempts | 挑戦回数 |
+| F | Last Played | 最終プレイ日時 |
 
 **注意**:
 - 初回起動時にヘッダーが自動生成されます
@@ -265,7 +303,7 @@ python main.py
 
 ## 📱 LINE Bot機能
 
-LINE Bot機能を使用すると、LINEから画像を送信してキャラクターを登録し、Google Driveに自動保存できます。
+LINE Bot機能を使用すると、LINEから画像を送信してキャラクターを登録し、Google Driveに自動保存できます。手動でステータスを入力するか、AI自動生成から選択できます。
 
 ### LINE Bot設定手順
 
@@ -278,54 +316,62 @@ LINE Bot機能を使用すると、LINEから画像を送信してキャラク�
 
 #### 2. Google Apps Script (GAS) 設定
 
-1. Googleスプレッドシートを作成
-2. 拡張機能 > Apps Script を開く
-3. 以下のコードを貼り付け：
+Google Apps Scriptは、画像のアップロード・削除・キャラクター登録を処理するWebアプリとして機能します。
+
+##### 2-1. スクリプト作成
+
+1. [Google Apps Script](https://script.google.com/) にアクセス
+2. 新しいプロジェクトを作成（または既存のプロジェクトを使用）
+3. `server/googlesheet_apps_script_with_properties.js`の内容をコピー＆ペースト
+4. **Deploy > New deployment** → **Web app**として公開
+   - 「次のユーザーとして実行」→「自分」を選択
+   - 「アクセスできるユーザー」→「全員」を選択
+5. 発行されたWebアプリURLをメモ（例: `https://script.google.com/macros/s/XXXXX/exec`）
+
+##### 2-2. スクリプトプロパティの設定（推奨）
+
+スクリプトプロパティを使用すると、APIキーやIDをコード内に直接書かずに安全に管理できます。
+
+**設定手順:**
+
+1. Google Apps Scriptエディタで**「プロジェクトの設定」**（⚙️アイコン）をクリック
+2. 「スクリプト プロパティ」タブを選択
+3. 「プロパティを追加」をクリックして以下を設定:
+
+| プロパティ名 | 説明 | 必須/オプション | 例 |
+|---|---|---|---|
+| `SHARED_SECRET` | GASとの認証用シークレット（ランダムな文字列） | **必須** | `oekaki_battler_secret_xyz123` |
+| `SPREADSHEET_ID` | Google SpreadsheetsのスプレッドシートID | **必須** | `1asfRGrWkPRszQl4IUDO20o9Z7cgnV1bEVKVNt6cmKfM` |
+| `DRIVE_FOLDER_ID` | Google DriveフォルダID（画像保存先） | オプション | `1JT7QnTcSrLo2AC4p580V7fa_MScuVd4G` |
+| `GOOGLE_API_KEY` | Google Gemini APIキー（現在は未使用） | オプション | - |
+
+4. 「プロパティを追加」を繰り返して、必要なプロパティをすべて追加
+
+**プロパティ値の取得方法:**
+- **SHARED_SECRET**: 任意のランダムな文字列を生成（例: `openssl rand -base64 32`）。`.env`ファイルと同じ値を使用
+- **SPREADSHEET_ID**: Google SheetsのURLから取得
+  - URL: `https://docs.google.com/spreadsheets/d/【ここがスプレッドシートID】/edit`
+- **DRIVE_FOLDER_ID**: Google DriveフォルダのURLから取得
+  - URL: `https://drive.google.com/drive/folders/【ここがフォルダID】`
+
+**スクリプトプロパティのメリット:**
+- ✅ **セキュリティ向上**: APIキーやIDをコード内に直接書かない
+- ✅ **更新が簡単**: スクリプトを再デプロイせずに設定を変更可能
+- ✅ **コード共有が安全**: スクリプトを共有しても秘密情報が漏れない
+- ✅ **環境ごとの管理**: テスト環境と本番環境で異なる値を使用可能
+
+**ハードコード版との比較:**
+
+スクリプトプロパティを使用せず、コード内に直接値を書くこともできます（`server/googlesheet_apps_script_updated.js`）:
 
 ```javascript
-function doPost(e) {
-  try {
-    if (!e.postData || !e.postData.contents) return ContentService.createTextOutput('no data');
-
-    var payload = JSON.parse(e.postData.contents);
-    
-    // シークレット確認
-    var SHARED_SECRET = 'YOUR_SHARED_SECRET_HERE';
-    if (!payload.secret || payload.secret !== SHARED_SECRET) {
-      return ContentService.createTextOutput(JSON.stringify({ok:false, error:'forbidden'}))
-             .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    var b64 = payload.image;
-    var mime = payload.mimeType || 'image/jpeg';
-    var filename = payload.filename || ('line_' + new Date().getTime() + '.jpg');
-
-    // Base64をデコードしてblobを作成
-    var blob = Utilities.newBlob(Utilities.base64Decode(b64), mime, filename);
-
-    // Driveに保存
-    var file = DriveApp.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    var url = file.getUrl();
-
-    // スプレッドシートに追記
-    var ssId = 'YOUR_SPREADSHEET_ID';
-    var ss = SpreadsheetApp.openById(ssId);
-    var sheet = ss.getSheetByName('Sheet1') || ss.getSheets()[0];
-    var now = new Date();
-    sheet.appendRow([now, filename, url]);
-
-    return ContentService.createTextOutput(JSON.stringify({ok:true, url:url}))
-           .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({ok:false, error:err.toString()}))
-           .setMimeType(ContentService.MimeType.JSON);
-  }
-}
+// ハードコード版（非推奨）
+var SHARED_SECRET = 'YOUR_SHARED_SECRET_HERE';
+var SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID';
+var DRIVE_FOLDER_ID = 'YOUR_DRIVE_FOLDER_ID';
 ```
 
-4. **Deploy > New deployment** → **Web app**として公開
-5. 発行されたURLをメモ
+しかし、**スクリプトプロパティの使用を強く推奨**します。ハードコード版は設定が簡単ですが、セキュリティリスクがあります。
 
 #### 3. 環境変数設定
 
@@ -375,10 +421,45 @@ chmod +x server_up.sh
 
 ### 使用方法
 
+#### 基本フロー
+
 1. LINE Botを友だち追加
 2. キャラクター画像を送信
-3. 自動でGoogle Driveに保存され、スプレッドシートに記録
-4. メインアプリケーションでキャラクターとして登録可能
+3. 画像がGoogle Driveに自動アップロード
+4. ボットが「ステータスを手動で入力しますか？」と質問
+5. 2つの登録方法から選択：
+
+#### 方法1: 手動入力
+
+1. 「はい（手動入力）」を選択
+2. 対話形式で以下を入力：
+   - キャラクター名
+   - HP（10-200）
+   - 攻撃力（10-150）
+   - 防御力（10-100）
+   - 素早さ（10-100）
+   - 魔力（10-100）
+   - 運（0-100）
+   - キャラクターの説明
+3. ステータス合計が350を超える場合はエラーとなり、最初からやり直し
+4. 入力完了後、自動的にスプレッドシートに登録
+5. メインアプリケーションで即座に使用可能
+
+#### 方法2: AI自動生成（遅延生成方式）
+
+1. 「いいえ（AI自動生成）」を選択
+2. 画像が登録され、ステータスは空の状態でスプレッドシートに保存
+3. ボットから「アプリを開いて確認してください」とメッセージ
+4. **お絵描きバトラーアプリを起動**
+5. アプリが空ステータスのキャラクターを自動検出
+6. Google Gemini AIが画像を分析してステータス自動生成
+7. 生成したステータスをスプレッドシートに反映
+8. メインアプリケーションで使用可能
+
+**メリット:**
+- ✅ **手動入力**: 完全なカスタマイズ、意図通りのステータス設定
+- ✅ **AI自動生成**: 既存のPython AIコードを活用、安定した処理
+- ✅ **遅延生成**: GASのタイムアウトを気にせず、確実に生成
 
 ### セキュリティ注意事項
 
@@ -421,16 +502,65 @@ chmod +x server_up.sh
 
 ### 2. バトル開始
 
+#### 通常バトル
 1. Fighter 1とFighter 2を選択
 2. Visual Modeを有効にしてリアルタイム表示
 3. 「⚔️ START BATTLE!」をクリック
 4. 自動戦闘を観戦
+
+#### ランダムバトル
+- 「🎲 Random Battle」をクリックでランダムにマッチング
+
+#### ストーリーモード
+1. メニューバーから「Game」→「Story Mode」を選択
+2. プレイヤーキャラクターを選択
+3. Lv1のボスから順番に挑戦
+4. 挑戦前に確認ウィンドウでボス情報を表示
+5. バトル開始（ビジュアルモード）
+6. 勝利すると次のレベルへ自動進行
+7. 敗北するとストーリーモード終了
+8. Lv5のボスを倒すとクリア
+
+**ボス管理**:
+- メニューバーから「Game」→「Story Boss Manager」を選択
+- Lv1～Lv5のボスを作成・編集
+- ステータス設定（HP: 10-300, Attack: 10-200, Defense: 10-150, Speed: 10-150, Magic: 10-150, Luck: 0-100）
+- ステータス合計上限: 500（キャラクターより高い）
+- 画像アップロードとスプライト生成
+- Google Driveに自動保存
+
+#### エンドレスバトル
+1. 「Endless Battle」をクリック
+2. ランダムに選ばれたチャンピオンが挑戦者と自動対戦
+3. チャンピオンが防衛を続ける勝ち抜き戦形式
+4. 新しいキャラクターを登録すると自動的に検出され対戦再開
+5. バトルログで戦況をリアルタイム確認
+6. 一時停止/再開可能
+7. 終了時に最終統計を表示
 
 ### 3. 統計確認
 
 - キャラクター一覧で戦績を確認
 - 「📊 View Statistics」で詳細統計
 - 「🏟️ Battle History」で戦闘履歴
+
+### 4. キャラクター削除
+
+1. キャラクター一覧から削除したいキャラクターを選択
+2. 「🗑️ Delete Character」をクリック
+3. 確認ダイアログで「はい」を選択
+
+**削除されるデータ:**
+- ✅ キャラクター本体（Google Sheets / SQLite）
+- ✅ バトル履歴レコード（該当キャラクターが参加した全バトル）
+- ✅ ランキングレコード
+- ✅ Google Drive画像（元画像とスプライト）※GAS設定時のみ
+- ✅ ローカルキャッシュ画像（`data/characters/`と`data/sprites/`）
+
+**注意:**
+- バトル履歴があるキャラクターを削除する場合、確認ダイアログが表示されます
+- 削除は取り消せません
+- GAS経由で画像をアップロードした場合、Google Driveからも自動的に削除されます
 
 ## 🏗️ プロジェクト構成
 
@@ -443,14 +573,18 @@ OekakiBattler/
 ├── src/
 │   ├── models/             # データモデル
 │   │   ├── character.py    # キャラクターモデル
-│   │   └── battle.py       # バトルモデル
+│   │   ├── battle.py       # バトルモデル
+│   │   └── story_boss.py   # ストーリーボスモデル
 │   ├── services/           # ビジネスロジック
-│   │   ├── image_processor.py    # 画像処理
-│   │   ├── ai_analyzer.py        # AI分析
-│   │   ├── battle_engine.py      # バトルエンジン
-│   │   └── sheets_manager.py     # Google Sheets管理
+│   │   ├── image_processor.py       # 画像処理
+│   │   ├── ai_analyzer.py           # AI分析
+│   │   ├── battle_engine.py         # バトルエンジン
+│   │   ├── endless_battle_engine.py # エンドレスバトルエンジン
+│   │   ├── story_mode_engine.py     # ストーリーモードエンジン
+│   │   └── sheets_manager.py        # Google Sheets管理
 │   ├── ui/                 # ユーザーインターフェース
-│   │   └── main_menu.py    # メインGUI
+│   │   ├── main_menu.py    # メインGUI
+│   │   └── story_boss_manager.py # ストーリーボス管理画面
 │   └── utils/              # ユーティリティ
 ├── credentials.json        # Google サービスアカウント認証情報（要作成）
 ├── server/                 # LINE Botサーバー
@@ -490,18 +624,50 @@ OekakiBattler/
 
 AIは以下の観点でキャラクターを分析します：
 
-- **体力 (HP)**: 体格、頑丈さから判定 (50-150)
-- **攻撃力**: 武器、筋肉質な描写から判定 (30-120)
-- **防御力**: 鎧、盾などの防具から判定 (20-100)
-- **素早さ**: 体型、手足の長さから判定 (40-130)
+- **体力 (HP)**: 体格、頑丈さから判定 (10-200)
+- **攻撃力**: 武器、筋肉質な描写から判定 (10-150)
+- **防御力**: 鎧、盾などの防具から判定 (10-100)
+- **素早さ**: 体型、手足の長さから判定 (10-100)
 - **魔法力**: 杖、魔法的装飾から判定 (10-100)
+- **運 (Luck)**: 幸運のシンボル、明るい表情、キラキラした装飾から判定 (0-100)
+
+**ステータス合計**: AIは自動的に合計350以下になるよう調整します
 
 ## ⚔️ バトルシステム
 
+### 通常バトル
 - **ターン制**: 素早さ順で行動決定
 - **ダメージ計算**: 攻撃力 - 防御力 + ランダム要素
-- **特殊効果**: クリティカル（5%）、回避、魔法攻撃
+- **特殊効果**:
+  - **クリティカル（5%）**: 2倍ダメージ、運により最大35%まで上昇
+  - **ガードブレイク（15%）**: 物理攻撃のみ、相手の防御力を完全無視、運により最大30%まで上昇
+  - **回避**: 素早さ差により判定、運により命中率が最大-30%
+  - **魔法攻撃**: 防御力50%軽減
+- **運の影響**:
+  - 防御側の運が高いほど相手の命中率が下がる（最大-30%）
+  - 攻撃側の運が高いほどクリティカル率が上がる（最大+30%）
+  - 攻撃側の運が高いほどガードブレイク率が上がる（最大+15%）
 - **勝利条件**: 相手のHP0または50ターン経過で判定
+
+### ストーリーモード
+- **固定ボス**: Lv1～Lv5までの5体のボス
+- **順次挑戦**: Lv1から順番に挑戦、勝利すると次のレベルへ進行
+- **ノンストップ実行**: 一度開始すると敗北またはクリアまで連続バトル
+- **挑戦確認**: 各バトル前にボス情報と「挑戦します！」を表示
+- **進捗記録**: キャラクターごとに進行状況を保存
+- **ボス管理**: 専用UIでボスの作成・編集が可能
+- **ステータス範囲**: HP (10-300)、Attack (10-200)、Defense (10-150)、Speed (10-150)、Magic (10-150)、Luck (0-100)、合計上限500
+- **クリア条件**: Lv5のボスを倒すと完全クリア
+
+### エンドレスバトル
+- **トーナメント形式**: ランダムに選ばれたチャンピオンが挑戦者と連戦
+- **勝ち抜き戦**: チャンピオンが勝利し続ける限り防衛継続
+- **チャンピオン交代**: 挑戦者が勝利すると新チャンピオン誕生
+- **新キャラ自動検出**: 3秒ごとに新規登録キャラを自動検出
+- **自動再開**: 新キャラクター検出時に自動でバトル再開
+- **連勝記録**: チャンピオンの防衛記録を追跡
+- **一時停止機能**: いつでもバトルを停止・再開可能
+- **最終統計**: 終了時に総バトル数、最終チャンピオン、連勝数を表示
 
 ## 📊 技術仕様
 
@@ -522,6 +688,22 @@ AIは以下の観点でキャラクターを分析します：
 - **Services**: ビジネスロジックの分離
 - **UI**: Tkinter/Pygameによるデスクトップアプリ
 - **Config**: 設定の一元管理
+
+### Drive操作の実装について
+
+**画像アップロード・削除の仕組み:**
+- Google Apps Script (GAS)経由でのみ実行
+- サービスアカウントの直接操作は廃止
+- GASがユーザー権限で実行されるため、アップロード・削除の両方が可能
+
+**理由:**
+- サービスアカウントはストレージクォータがない（アップロード不可）
+- サービスアカウントはユーザー所有ファイルを削除できない（権限不足）
+- GAS経由の統一で実装がシンプルに
+
+**実装箇所:**
+- `src/services/sheets_manager.py`: `upload_to_drive()`, `delete_from_drive()`
+- `server/googlesheet_apps_script_updated.js`: `doPost()`, `handleDelete()`
 
 ### 拡張可能性
 
@@ -562,6 +744,77 @@ AIは以下の観点でキャラクターを分析します：
 - **原因**: Google Drive APIが有効化されていない、またはサービスアカウントの権限不足
 - **解決**: Google Drive APIを有効化し、Driveフォルダをサービスアカウントと共有（編集者権限）
 
+**問題**: `storageQuotaExceeded` エラーが発生する
+- **エラー内容**: `Service Accounts do not have storage quota`
+- **原因**: サービスアカウントがファイルを作成すると、サービスアカウント自身が所有者になりますが、サービスアカウントには独自のストレージ容量が割り当てられていません
+- **解決方法（3つの選択肢）**:
+
+  **方法1: 共有ドライブを使用【推奨・Google Workspaceユーザー向け】**
+  1. Google Workspace管理者として[Google Drive](https://drive.google.com/)にアクセス
+  2. 左メニューの「共有ドライブ」→「新規」をクリック
+  3. 名前を入力（例: "OekakiBattler"）して作成
+  4. 共有ドライブを開き、新しいフォルダを作成（例: "Images"）
+  5. フォルダを右クリック→「共有」→サービスアカウントのメールアドレスを追加（コンテンツ管理者権限）
+  6. フォルダのURLから共有ドライブのフォルダIDをコピー
+  7. `.env`ファイルの`DRIVE_FOLDER_ID`を共有ドライブのフォルダIDに更新
+
+  **方法2: Google Apps Scriptを使用【個人アカウント向け・推奨】**
+
+  既存のLINE Bot用Google Apps Scriptを利用して、あなたのアカウントのストレージに画像を保存・削除できます。
+
+  1. **Google Apps Scriptのデプロイ**
+     - [Google Apps Script](https://script.google.com/)にアクセス
+     - 新しいプロジェクトを作成（または既存のLINE Bot用プロジェクトを使用）
+     - `server/googlesheet_apps_script_updated.js`の内容をコピー＆ペースト
+     - スクリプト内の以下を設定:
+       ```javascript
+       var SHARED_SECRET = 'oekaki_battler_line_to_gas_secret_shiyow5'; // シークレット
+       var folderId = '1JT7QnTcSrLo2AC4p580V7fa_MScuVd4G'; // あなたのDriveフォルダID
+       ```
+     - 「デプロイ」→「新しいデプロイ」→「ウェブアプリ」を選択
+     - 「次のユーザーとして実行」→「自分」を選択
+     - 「アクセスできるユーザー」→「全員」を選択
+     - デプロイ後、ウェブアプリのURLをコピー
+
+  2. **環境変数を設定**
+     `.env`ファイルに以下を追加:
+     ```bash
+     GAS_WEBHOOK_URL="https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec"
+     SHARED_SECRET="oekaki_battler_line_to_gas_secret_shiyow5"
+     ```
+
+  3. アプリケーションを再起動
+
+  **メリット**:
+  - あなたのアカウントのストレージを使用（容量エラーなし）
+  - 画像のアップロードと削除の両方に対応
+  - 設定が簡単
+  - LINE BotとPythonアプリの両方で使用可能
+  - サービスアカウントの権限問題を回避（GASがユーザー権限で実行）
+
+  **デメリット**:
+  - GASのリクエスト制限あり（1日20,000回）
+
+  **注意**:
+  - この方法では、キャラクター削除時にGoogle Driveからも画像が自動削除されます
+  - GASの`handleDelete()`関数が削除リクエストを処理します
+
+  **方法3: ローカルストレージのみ使用**
+  1. `.env`ファイルから`DRIVE_FOLDER_ID`と`GAS_WEBHOOK_URL`の行を削除:
+     ```bash
+     # DRIVE_FOLDER_ID="..."  # コメントアウト
+     # GAS_WEBHOOK_URL="..."  # コメントアウト
+     ```
+  2. アプリケーションを再起動
+  3. 画像はローカル（`data/characters/`と`data/sprites/`）にのみ保存されます
+
+  **方法4: OAuth 2.0認証を使用【上級者向け】**
+  - サービスアカウントの代わりにOAuth 2.0ユーザー認証を使用
+  - 実装には`google-auth-oauthlib`と認証フローの変更が必要
+  - 詳細は[Google Drive API OAuth 2.0ドキュメント](https://developers.google.com/drive/api/guides/about-auth)を参照
+
+- **現在の動作**: 画像アップロードが失敗しても、ローカルパスでスプレッドシートに保存され、機能は継続します
+
 **問題**: 画像ダウンロードが失敗する
 - **原因**: Google DriveのURLがprivateになっている、またはネットワーク接続の問題
 - **解決**: ファイルの共有設定を確認（リンクを知っている全員が閲覧可）、インターネット接続を確認
@@ -585,9 +838,12 @@ AIは以下の観点でキャラクターを分析します：
 ## ✨ 今後の予定
 
 - [x] LINE Bot連携機能
+- [x] ストーリーモード
 - [ ] Web版の開発
 - [ ] モバイルアプリ対応
 - [ ] オンライン対戦機能
+- [ ] トーナメントブラケットシステム
+- [ ] キャラクター成長・レベルアップシステム
 - [ ] 追加のAI分析モデル
 - [ ] キャラクター編集機能
 - [ ] LINE Botからの直接バトル機能

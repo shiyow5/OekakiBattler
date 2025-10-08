@@ -2,28 +2,77 @@ import logging
 import sqlite3
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from pathlib import Path
 from src.models import Character, Battle, BattleTurn
 from config.database import execute_query, get_connection
+from config.settings import Settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     """Manage database operations for characters and battles"""
-    
+
     def __init__(self):
         self.connection_cache = {}
+
+    @staticmethod
+    def _to_relative_path(absolute_path: str) -> str:
+        """Convert absolute path to project-relative path"""
+        try:
+            if not absolute_path:
+                return absolute_path
+
+            abs_path = Path(absolute_path)
+            # If already relative or doesn't exist, return as-is
+            if not abs_path.is_absolute():
+                return absolute_path
+
+            # Convert to relative from project root
+            try:
+                rel_path = abs_path.relative_to(Settings.PROJECT_ROOT)
+                return str(rel_path)
+            except ValueError:
+                # Path is outside project root, return as-is
+                logger.warning(f"Path outside project root: {absolute_path}")
+                return absolute_path
+        except Exception as e:
+            logger.warning(f"Error converting path to relative: {e}")
+            return absolute_path
+
+    @staticmethod
+    def _to_absolute_path(relative_path: str) -> str:
+        """Convert project-relative path to absolute path"""
+        try:
+            if not relative_path:
+                return relative_path
+
+            path = Path(relative_path)
+            # If already absolute, return as-is
+            if path.is_absolute():
+                return relative_path
+
+            # Convert to absolute from project root
+            abs_path = Settings.PROJECT_ROOT / path
+            return str(abs_path)
+        except Exception as e:
+            logger.warning(f"Error converting path to absolute: {e}")
+            return relative_path
     
     def save_character(self, character: Character) -> bool:
         """Save character to database"""
         try:
             query = """
-                INSERT OR REPLACE INTO characters 
-                (id, name, hp, attack, defense, speed, magic, description, 
+                INSERT OR REPLACE INTO characters
+                (id, name, hp, attack, defense, speed, magic, luck, description,
                  image_path, sprite_path, created_at, battle_count, win_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
-            
+
+            # Convert paths to relative before saving
+            rel_image_path = self._to_relative_path(character.image_path)
+            rel_sprite_path = self._to_relative_path(character.sprite_path)
+
             params = (
                 character.id,
                 character.name,
@@ -32,9 +81,10 @@ class DatabaseManager:
                 character.defense,
                 character.speed,
                 character.magic,
+                character.luck,
                 character.description,
-                character.image_path,
-                character.sprite_path,
+                rel_image_path,
+                rel_sprite_path,
                 character.created_at.isoformat(),
                 character.battle_count,
                 character.win_count
@@ -469,6 +519,10 @@ class DatabaseManager:
     
     def _row_to_character_dict(self, row) -> Dict[str, Any]:
         """Convert database row to character dictionary"""
+        # Convert relative paths to absolute when loading
+        abs_image_path = self._to_absolute_path(row[9]) if row[9] else ""
+        abs_sprite_path = self._to_absolute_path(row[10]) if row[10] else ""
+
         return {
             'id': row[0],
             'name': row[1],
@@ -477,12 +531,13 @@ class DatabaseManager:
             'defense': row[4],
             'speed': row[5],
             'magic': row[6],
-            'description': row[7] if row[7] else "",
-            'image_path': row[8],
-            'sprite_path': row[9],
-            'created_at': row[10],
-            'battle_count': row[11],
-            'win_count': row[12]
+            'luck': row[7],
+            'description': row[8] if row[8] else "",
+            'image_path': abs_image_path,
+            'sprite_path': abs_sprite_path,
+            'created_at': row[11],
+            'battle_count': row[12],
+            'win_count': row[13]
         }
     
     def _row_to_battle_dict(self, row) -> Dict[str, Any]:

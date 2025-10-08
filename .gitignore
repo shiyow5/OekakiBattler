@@ -172,3 +172,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Project-specific sensitive files
+credentials.json
+server/.env
+data/database.db
+*.db
+data/*

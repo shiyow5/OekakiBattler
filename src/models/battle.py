@@ -11,6 +11,7 @@ class BattleTurn(BaseModel):
     damage: int = 0
     is_critical: bool = False
     is_miss: bool = False
+    is_guard_break: bool = False
     attacker_hp_after: int
     defender_hp_after: int
 

@@ -7,6 +7,7 @@ import time
 import logging
 import pygame
 import math
+import os
 from pathlib import Path
 from typing import Tuple, List, Optional
 from src.models import Character, Battle, BattleTurn, BattleResult
@@ -39,6 +40,16 @@ class BattleEngine:
         self.battle_sprites = {}
         self.background_image = None  # Battle arena background image
 
+        # Performance optimization: Pre-calculated values
+        self.screen_scale_x = 1.0
+        self.screen_scale_y = 1.0
+        self.screen_scale = 1.0
+        self.char1_base_pos = (250, 350)
+        self.char2_base_pos = (774, 350)
+
+        # Font cache for performance
+        self._font_cache = {}
+
         # Effect systems
         self.effects = None
         self.animator = None
@@ -46,45 +57,114 @@ class BattleEngine:
     def initialize_display(self) -> bool:
         """Initialize Pygame display for battle visualization"""
         try:
-            # Clean up any existing display first
+            # Detect monitors BEFORE any pygame display operations
+            # and set environment variable for window positioning
+            try:
+                # Initialize Pygame if not already done (needed for display detection)
+                if not pygame.get_init():
+                    logger.warning("Pygame not initialized on main thread - attempting initialization")
+                    pygame.init()
+                    self.pygame_initialized = True
+                    logger.info("Pygame initialized (fallback)")
+
+                num_displays = pygame.display.get_num_displays()
+                logger.info(f"Detected {num_displays} display(s)")
+
+                if num_displays > 1:
+                    # Get desktop info for all displays
+                    desktop_sizes = pygame.display.get_desktop_sizes()
+                    logger.info(f"Display sizes: {desktop_sizes}")
+
+                    # Position window on second monitor (index 1)
+                    # Calculate x position: primary monitor width
+                    primary_width = desktop_sizes[0][0]
+
+                    # Set SDL environment variable to position window on secondary monitor
+                    # This MUST be set BEFORE any display.quit() or display.set_mode() calls
+                    os.environ['SDL_VIDEO_WINDOW_POS'] = f"{primary_width},0"
+                    logger.info(f"✓ Will position battle window on secondary monitor at x={primary_width}")
+                else:
+                    logger.info("Single display detected, using primary monitor")
+            except Exception as e:
+                logger.warning(f"Could not detect multiple displays: {e}")
+                logger.info("Falling back to primary monitor")
+
+            # Clean up any existing display AFTER setting environment variable
             if self.screen is not None:
                 try:
                     pygame.display.quit()
                     self.screen = None
                 except:
                     pass
-            
-            # Initialize Pygame if not already done
-            # Note: pygame.init() should be called on main thread (done in main.py for macOS 15+)
-            if not pygame.get_init():
-                logger.warning("Pygame not initialized on main thread - attempting initialization")
-                pygame.init()
-                self.pygame_initialized = True
-                logger.info("Pygame initialized (fallback)")
-            
+
+            # Re-initialize Pygame display subsystem if we just quit it
+            if not pygame.display.get_init():
+                pygame.display.init()
+
             # Initialize audio and load default sounds
             audio_manager.create_default_sounds()
-            
-            # Create new display
-            self.screen = pygame.display.set_mode((Settings.SCREEN_WIDTH, Settings.SCREEN_HEIGHT))
-            logger.info("New battle display created")
-            
+
+            # Create new display in fullscreen mode
+            # Try to use display parameter for pygame 2.0+ to specify monitor
+            try:
+                # Check if we have multiple displays and can use display parameter
+                num_displays = pygame.display.get_num_displays()
+                logger.info(f"Available displays: {num_displays}")
+
+                # Determine which display to use
+                target_display = 0  # Default to primary
+
+                if num_displays > 1:
+                    # Use configured display index from settings
+                    target_display = Settings.BATTLE_DISPLAY_INDEX
+
+                    # Validate the display index (indices are 0-based)
+                    if target_display >= num_displays:
+                        logger.warning(f"Configured BATTLE_DISPLAY_INDEX={target_display} is out of range")
+                        logger.warning(f"  Available displays: {num_displays} (indices 0-{num_displays-1})")
+                        logger.warning(f"  → Using secondary monitor (display {num_displays - 1})")
+                        target_display = num_displays - 1
+
+                    display_label = "primary" if target_display == 0 else f"secondary (display {target_display})"
+                    logger.info(f"Attempting to create fullscreen on {display_label}")
+                    self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN, display=target_display)
+                    logger.info(f"✓ Successfully created display on monitor {target_display} ({display_label})")
+                else:
+                    logger.info("Single display detected, using display 0")
+                    self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            except TypeError:
+                # Fallback for older pygame versions that don't support display parameter
+                logger.warning("Pygame version doesn't support display parameter, using SDL_VIDEO_WINDOW_POS")
+                self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            except Exception as e:
+                logger.warning(f"Failed to set display on monitor {target_display}: {e}")
+                logger.warning("Trying fallback to display 0")
+                self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+
+            # Get actual fullscreen size
+            self.screen_width = self.screen.get_width()
+            self.screen_height = self.screen.get_height()
+
+            logger.info(f"New battle display created in fullscreen mode ({self.screen_width}x{self.screen_height})")
+
             pygame.display.set_caption("お絵描きバトラー - Battle Arena")
-            
+
             # Initialize clock if needed
             if self.clock is None:
                 self.clock = pygame.time.Clock()
             
-            # Load fonts with Japanese support
+            # Load fonts with Japanese and emoji support
             if self.font is None:
                 try:
-                    # Try to load a Japanese font
+                    # Try to load a Japanese font with emoji support
                     japanese_fonts = [
+                        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",  # Linux Noto (best for CJK + emoji fallback)
+                        "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",  # Linux alternative path
+                        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux alternative path
+                        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",  # macOS
+                        "C:/Windows/Fonts/msgothic.ttc",  # Windows
                         "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",  # Linux system font
                         "/usr/share/fonts/truetype/fonts-japanese-mincho.ttf",  # Linux system font
-                        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",  # macOS
-                        "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",  # Linux
-                        "C:/Windows/Fonts/msgothic.ttc",  # Windows
                         "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Linux fallback
                     ]
 
@@ -117,13 +197,15 @@ class BattleEngine:
                     if self.japanese_font_path:
                         self.small_font = pygame.font.Font(self.japanese_font_path, 18)
                     else:
-                        # Try to load a Japanese font
+                        # Try to load a Japanese font with emoji support
                         japanese_fonts = [
+                            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                            "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",
+                            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+                            "C:/Windows/Fonts/msgothic.ttc",
                             "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
                             "/usr/share/fonts/truetype/fonts-japanese-mincho.ttf",
-                            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-                            "/usr/share/fonts/truetype/noto-cjk/NotoSansCJK-Regular.ttc",
-                            "C:/Windows/Fonts/msgothic.ttc",
                             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
                         ]
 
@@ -151,7 +233,16 @@ class BattleEngine:
             # Load background image
             self._load_background_image()
 
-            logger.info("Battle display initialized successfully")
+            # Performance optimization: Pre-calculate scale values for rendering
+            self.screen_scale_x = self.screen_width / 1024
+            self.screen_scale_y = self.screen_height / 768
+            self.screen_scale = min(self.screen_scale_x, self.screen_scale_y)
+
+            # Pre-calculate character base positions
+            self.char1_base_pos = (int(250 * self.screen_scale_x), int(350 * self.screen_scale_y))
+            self.char2_base_pos = (int((self.screen_width - 250 * self.screen_scale_x)), int(350 * self.screen_scale_y))
+
+            logger.info(f"Battle display initialized successfully (scale: {self.screen_scale:.2f}x)")
             return True
         except Exception as e:
             logger.error(f"Failed to initialize battle display: {e}")
@@ -179,8 +270,8 @@ class BattleEngine:
             char2_current_hp = char2.hp
 
             # Add battle start log
-            battle.add_log_entry(f"🥊 バトル開始！ {char1.name} VS {char2.name}")
-            battle.add_log_entry(f"💚 {char1.name} HP: {char1_current_hp} / {char2.name} HP: {char2_current_hp}")
+            battle.add_log_entry(f"[START] バトル開始！ {char1.name} VS {char2.name}")
+            battle.add_log_entry(f"[HP] {char1.name} HP: {char1_current_hp} / {char2.name} HP: {char2_current_hp}")
 
             # Initialize display if visual mode
             if visual_mode:
@@ -192,26 +283,39 @@ class BattleEngine:
             
             # Battle loop
             start_time = time.time()
-            turn_number = 1
-            
-            while turn_number <= self.max_turns:
+            action_count = 0  # Count individual actions (not rounds)
+            max_actions = self.max_turns * 2  # Each turn has 2 actions (one per character)
+
+            while action_count < max_actions:
                 # Check if battle should end
                 if char1_current_hp <= 0 or char2_current_hp <= 0:
                     break
-                
+
                 # Determine turn order
                 turn_order = self.determine_turn_order(char1, char2)
-                
+
                 for attacker, defender in turn_order:
+                    # Check action limit before each action
+                    if action_count >= max_actions:
+                        logger.info(f"Reached max actions limit: {max_actions}")
+                        break
+
+                    # Check if battle should end
+                    if char1_current_hp <= 0 or char2_current_hp <= 0:
+                        break
+
                     if attacker.id == char1.id:
                         attacker_hp, defender_hp = char1_current_hp, char2_current_hp
                     else:
                         attacker_hp, defender_hp = char2_current_hp, char1_current_hp
-                    
+
                     # Skip turn if attacker is defeated
                     if attacker_hp <= 0:
                         continue
-                    
+
+                    # Calculate current turn number (1-indexed, based on actions)
+                    turn_number = (action_count // 2) + 1
+
                     # Execute turn
                     turn = self.execute_turn(attacker, defender, turn_number, attacker_hp, defender_hp)
                     battle.add_turn(turn)
@@ -235,13 +339,21 @@ class BattleEngine:
                     if visual_mode and self.screen:
                         self._update_battle_display(char1, char2, char1_current_hp, char2_current_hp, turn, battle.battle_log[-5:])
                         time.sleep(0.5 * self.battle_speed)
-                    
-                    # Check if battle should end
+
+                    # Increment action count
+                    action_count += 1
+
+                    # Check if battle should end after action
                     if char1_current_hp <= 0 or char2_current_hp <= 0:
                         break
-                
-                turn_number += 1
             
+            # Log battle end reason
+            if char1_current_hp <= 0 or char2_current_hp <= 0:
+                logger.info(f"Battle ended by KO (actions: {action_count}/{max_actions})")
+            elif action_count >= max_actions:
+                logger.info(f"Battle ended by time limit (max turns: {self.max_turns}, max actions: {max_actions})")
+                battle.add_log_entry(f"[TIME UP] {self.max_turns}ターン経過！時間切れです！")
+
             # Calculate battle statistics
             battle.char1_final_hp = char1_current_hp
             battle.char2_final_hp = char2_current_hp
@@ -256,7 +368,7 @@ class BattleEngine:
             # Determine winner and result type
             if char1_current_hp <= 0 or char2_current_hp <= 0:
                 battle.result_type = "KO"
-            elif turn_number > self.max_turns:
+            elif action_count >= max_actions:
                 battle.result_type = "Time Limit"
             else:
                 battle.result_type = "Draw"
@@ -277,12 +389,12 @@ class BattleEngine:
             
             # Add final log
             if battle.winner_id:
-                battle.add_log_entry(f"🎉 バトル終了！勝者: {winner_name}")
+                battle.add_log_entry(f"[WIN!] バトル終了！勝者: {winner_name}")
             else:
-                battle.add_log_entry("⚖️ バトル終了！引き分け！")
-            
-            battle.add_log_entry(f"⏱️ バトル時間: {battle.duration:.2f}秒")
-            battle.add_log_entry(f"🔄 総ターン数: {len(battle.turns)}")
+                battle.add_log_entry("[DRAW] バトル終了！引き分け！")
+
+            battle.add_log_entry(f"[TIME] バトル時間: {battle.duration:.2f}秒")
+            battle.add_log_entry(f"[TURNS] 総ターン数: {len(battle.turns)}")
             
             logger.info(f"Battle completed: Winner - {winner_name}")
             
@@ -314,48 +426,68 @@ class BattleEngine:
                 error_battle.add_log_entry(f"Battle failed: {e}")
                 return error_battle
     
-    def calculate_damage(self, attacker: Character, defender: Character, action_type: str = "attack") -> Tuple[int, bool, bool]:
-        """Calculate damage, critical hit, and miss status"""
+    def calculate_damage(self, attacker: Character, defender: Character, action_type: str = "attack") -> Tuple[int, bool, bool, bool]:
+        """Calculate damage, critical hit, miss status, and guard break"""
         try:
             is_critical = False
             is_miss = False
+            is_guard_break = False
             base_damage = 0
-            
-            # Calculate hit chance based on speed difference
+
+            # Calculate hit chance based on speed difference and defender's luck
             speed_diff = attacker.speed - defender.speed
-            hit_chance = max(0.8, min(0.95, 0.85 + speed_diff * 0.001))
-            
+            base_hit_chance = max(0.8, min(0.95, 0.85 + speed_diff * 0.001))
+
+            # Defender's luck reduces hit chance (max -30%)
+            luck_modifier = (defender.luck / 100) * 0.3
+            hit_chance = max(0.55, base_hit_chance - luck_modifier)
+
             # Check for miss
             if random.random() > hit_chance:
                 is_miss = True
-                return 0, is_critical, is_miss
-            
+                return 0, is_critical, is_miss, is_guard_break
+
             # Calculate base damage
             if action_type == "magic":
                 base_damage = attacker.magic + random.randint(-10, 10)
                 # Magic ignores some defense
-                effective_defense = max(0, defender.defense * 0.5)
+                effective_defense = int(max(0, defender.defense * 0.5))
             else:  # Physical attack
                 base_damage = attacker.attack + random.randint(-15, 15)
-                effective_defense = defender.defense
-            
+
+                # Check for guard break (physical attacks only)
+                # Base 15% + attacker's luck (max +15%)
+                base_guard_break_chance = 0.15
+                luck_guard_break_bonus = (attacker.luck / 100) * 0.15
+                guard_break_chance = min(0.30, base_guard_break_chance + luck_guard_break_bonus)
+
+                if random.random() < guard_break_chance:
+                    is_guard_break = True
+                    effective_defense = 0  # Ignore all defense
+                else:
+                    effective_defense = defender.defense
+
             # Apply defense
-            damage = max(1, base_damage - effective_defense + random.randint(-5, 5))
-            
-            # Check for critical hit
-            critical_chance = self.critical_chance
+            damage = int(max(1, base_damage - effective_defense + random.randint(-5, 5)))
+
+            # Check for critical hit - attacker's luck increases critical chance (max +30%)
+            base_critical_chance = self.critical_chance
             if action_type == "magic":
-                critical_chance *= 0.7  # Magic has lower critical chance
-            
+                base_critical_chance *= 0.7  # Magic has lower critical chance
+
+            # Attacker's luck increases critical chance
+            luck_crit_bonus = (attacker.luck / 100) * 0.3
+            critical_chance = min(0.35, base_critical_chance + luck_crit_bonus)
+
             if random.random() < critical_chance:
                 is_critical = True
                 damage = int(damage * self.critical_multiplier)
-            
-            return damage, is_critical, is_miss
-            
+
+            return damage, is_critical, is_miss, is_guard_break
+
         except Exception as e:
             logger.error(f"Error calculating damage: {e}")
-            return 10, False, False  # Fallback damage
+            return 10, False, False, False  # Fallback damage
     
     def determine_turn_order(self, char1: Character, char2: Character) -> List[Tuple[Character, Character]]:
         """Determine who goes first based on speed"""
@@ -378,13 +510,13 @@ class BattleEngine:
         try:
             # Determine action type based on character stats and situation
             action_type = self._choose_action(attacker, defender, defender_hp)
-            
-            # Calculate damage
-            damage, is_critical, is_miss = self.calculate_damage(attacker, defender, action_type)
-            
+
+            # Calculate damage (now returns 4 values including guard break)
+            damage, is_critical, is_miss, is_guard_break = self.calculate_damage(attacker, defender, action_type)
+
             # Apply damage
             defender_hp_after = max(0, defender_hp - damage)
-            
+
             # Create turn record
             turn = BattleTurn(
                 turn_number=turn_number,
@@ -394,12 +526,13 @@ class BattleEngine:
                 damage=damage,
                 is_critical=is_critical,
                 is_miss=is_miss,
+                is_guard_break=is_guard_break,
                 attacker_hp_after=attacker_hp,
                 defender_hp_after=defender_hp_after
             )
-            
+
             return turn
-            
+
         except Exception as e:
             logger.error(f"Error executing turn: {e}")
             # Return safe default turn
@@ -411,6 +544,7 @@ class BattleEngine:
                 damage=0,
                 is_critical=False,
                 is_miss=True,
+                is_guard_break=False,
                 attacker_hp_after=attacker_hp,
                 defender_hp_after=defender_hp
             )
@@ -443,19 +577,28 @@ class BattleEngine:
         """Create descriptive log message for a turn"""
         try:
             if turn.is_miss:
-                return f"💨 {attacker.name}の攻撃は外れた！"
-            
+                return f"[MISS] {attacker.name}の攻撃は外れた！"
+
+            # Guard break message (can occur with critical)
+            guard_break_msg = ""
+            if turn.is_guard_break:
+                guard_break_msg = "[GB!]"
+
             if turn.action_type == "magic":
                 if turn.is_critical:
-                    return f"✨💥 {attacker.name}のクリティカル魔法攻撃！{defender.name}に{turn.damage}ダメージ！"
+                    return f"[CRIT!] {attacker.name}の魔法攻撃！{defender.name}に{turn.damage}ダメージ！"
                 else:
-                    return f"🔮 {attacker.name}の魔法攻撃！{defender.name}に{turn.damage}ダメージ"
+                    return f"[MAGIC] {attacker.name}の魔法攻撃！{defender.name}に{turn.damage}ダメージ"
             else:
-                if turn.is_critical:
-                    return f"⚔️💥 {attacker.name}のクリティカル攻撃！{defender.name}に{turn.damage}ダメージ！"
+                if turn.is_critical and turn.is_guard_break:
+                    return f"[CRIT!]{guard_break_msg} {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ！"
+                elif turn.is_critical:
+                    return f"[CRIT!] {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ！"
+                elif turn.is_guard_break:
+                    return f"{guard_break_msg} {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ！"
                 else:
-                    return f"⚔️ {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ"
-                
+                    return f"[ATK] {attacker.name}の攻撃！{defender.name}に{turn.damage}ダメージ"
+
         except Exception as e:
             logger.error(f"Error creating turn log: {e}")
             return f"{attacker.name} attacks {defender.name}"
@@ -493,11 +636,20 @@ class BattleEngine:
                 defender_hp_before = char1_hp
                 defender_hp_after = turn.defender_hp_after
 
-            # Calculate frame counts based on battle_speed
-            # battle_speed: 0.01 (fastest) to 3.0 (slowest), default 0.5
+            # Calculate frame rate based on battle_speed
+            # battle_speed: 0.0 (fastest) to 1.0 (slowest), default 0.5
+            # Lower battle_speed = fewer frames = faster animation
             # Higher battle_speed = more frames = slower animation
-            speed_multiplier = self.battle_speed * 2  # Convert to reasonable multiplier (0.02 to 6.0)
+            base_fps = 60
+            fps = base_fps  # Keep FPS constant at 60
 
+            logger.debug(f"Battle speed: {self.battle_speed}, FPS: {fps}")
+
+            # Calculate frame counts based on battle_speed
+            # battle_speed 0.0 = instant (1 frame)
+            # battle_speed 0.5 = default speed
+            # battle_speed 1.0 = slowest (double frames)
+            speed_multiplier = max(0.02, self.battle_speed / 0.5)  # Normalize to default (0.5), minimum 0.02 for very fast
             bounce_frames = int(50 * speed_multiplier)
             charge_frames = int(30 * speed_multiplier)
             windup_frames = int(15 * speed_multiplier)
@@ -558,12 +710,20 @@ class BattleEngine:
                     else:
                         audio_manager.play_sound("attack")
 
+                    # Guard break sound effect
+                    if turn.is_guard_break:
+                        audio_manager.play_sound("guard_break")
+
                     # Now create impact effects and show damage
                     self.effects.create_slash_trail(attacker_pos, defender_pos)
                     self.effects.create_impact_particles(
                         defender_pos[0], defender_pos[1],
                         direction, 25
                     )
+
+                    # Guard break visual effect (blue shattered shield)
+                    if turn.is_guard_break:
+                        self.effects.create_explosion(defender_pos[0], defender_pos[1], 45, (100, 150, 255))  # Blue explosion for shield break
 
                     if turn.is_critical:
                         self.effects.screen_shake(18, 12)
@@ -605,12 +765,12 @@ class BattleEngine:
             return
 
         try:
-            # Get actual screen size and calculate scale
-            screen_width = self.screen.get_width()
-            screen_height = self.screen.get_height()
-            scale_x = screen_width / 1024
-            scale_y = screen_height / 768
-            scale = min(scale_x, scale_y)
+            # Use pre-calculated scale values for performance
+            screen_width = self.screen_width
+            screen_height = self.screen_height
+            scale_x = self.screen_scale_x
+            scale_y = self.screen_scale_y
+            scale = self.screen_scale
 
             # Update effect systems
             if self.effects:
@@ -642,20 +802,17 @@ class BattleEngine:
             # Draw arena border
             pygame.draw.rect(self.screen, (100, 100, 100), arena_rect, int(3 * scale))
 
-            # Character positions with animation offsets (adjusted for taller arena)
-            char1_base_pos = (int(250 * scale_x), int(350 * scale_y))
-            char2_base_pos = (int((screen_width - 250 * scale_x)), int(350 * scale_y))
-
+            # Character positions with animation offsets (using pre-calculated base positions)
             char1_offset = self.animator.get_offset(char1.id) if self.animator else (0, 0)
             char2_offset = self.animator.get_offset(char2.id) if self.animator else (0, 0)
 
             char1_pos = (
-                char1_base_pos[0] + int(char1_offset[0]) + shake_offset[0],
-                char1_base_pos[1] + int(char1_offset[1]) + shake_offset[1]
+                self.char1_base_pos[0] + int(char1_offset[0]) + shake_offset[0],
+                self.char1_base_pos[1] + int(char1_offset[1]) + shake_offset[1]
             )
             char2_pos = (
-                char2_base_pos[0] + int(char2_offset[0]) + shake_offset[0],
-                char2_base_pos[1] + int(char2_offset[1]) + shake_offset[1]
+                self.char2_base_pos[0] + int(char2_offset[0]) + shake_offset[0],
+                self.char2_base_pos[1] + int(char2_offset[1]) + shake_offset[1]
             )
 
             # Draw characters (pass scale for proper sizing)
@@ -666,19 +823,32 @@ class BattleEngine:
             self._draw_hp_bars(char1, char2, char1_pos, char2_pos, char1_hp, char2_hp, shake_offset, scale)
 
             # Draw character names (below the character images)
-            name1_surface = self.font.render(char1.name, True, (0, 0, 0))
-            name2_surface = self.font.render(char2.name, True, (0, 0, 0))
-            self.screen.blit(name1_surface, (char1_pos[0] - int(40 * scale), char1_pos[1] + int(170 * scale)))
-            self.screen.blit(name2_surface, (char2_pos[0] - int(40 * scale), char2_pos[1] + int(170 * scale)))
+            # Scale font size based on screen size
+            name_font_size = int(40 * scale)  # Increased from 28 base to 40 base
+            name_font = self._create_font(name_font_size)
+            name1_surface = name_font.render(char1.name, True, (0, 0, 0))
+            name2_surface = name_font.render(char2.name, True, (0, 0, 0))
+            # Center the name horizontally with character position
+            name1_rect = name1_surface.get_rect(center=(char1_pos[0], char1_pos[1] + int(170 * scale)))
+            name2_rect = name2_surface.get_rect(center=(char2_pos[0], char2_pos[1] + int(170 * scale)))
+            self.screen.blit(name1_surface, name1_rect)
+            self.screen.blit(name2_surface, name2_rect)
 
             # Draw effects
             if self.effects:
                 self.effects.draw()
 
-            # Draw damage text
-            if current_turn and not current_turn.is_miss and current_turn.damage > 0:
+            # Draw action text (on attacker) and damage text (on defender)
+            if current_turn:
+                attacker_pos = char1_pos if current_turn.attacker_id == char1.id else char2_pos
                 defender_pos = char2_pos if current_turn.attacker_id == char1.id else char1_pos
-                self._draw_damage_text(current_turn, defender_pos, scale)
+
+                # Draw action text above attacker
+                self._draw_action_text(current_turn, attacker_pos, scale)
+
+                # Draw damage text on defender (only if hit and damage > 0)
+                if not current_turn.is_miss and current_turn.damage > 0:
+                    self._draw_damage_text(current_turn, defender_pos, scale)
 
             # Draw recent battle log (moved down to fit taller arena)
             if recent_logs:
@@ -697,40 +867,66 @@ class BattleEngine:
     def _draw_hp_bars(self, char1: Character, char2: Character, char1_pos: Tuple[int, int], char2_pos: Tuple[int, int], char1_hp: int, char2_hp: int, shake_offset: List[int], scale: float = 1.0):
         """Draw HP bars for both characters"""
         try:
-            # Larger HP bars to match bigger characters
-            hp_bar_width = int(250 * scale)  # Increased to 250 for even longer bar
-            hp_bar_height = int(25 * scale)  # Increased from 20 to 25
-            hp_bar_offset_x = int(125 * scale)  # Increased to 125 to center the longer bar
-            hp_bar_offset_y = int(180 * scale)  # Increased from 80 to 180 for bigger characters
+            # HP bar dimensions
+            hp_bar_width = int(280 * scale)  # Increased to 280 to accommodate larger text
+            hp_bar_height = int(30 * scale)  # Increased from 25 to 30 for better visibility
+            hp_bar_offset_x = int(140 * scale)  # Increased to 140 to center the longer bar
+            hp_bar_offset_y = int(185 * scale)  # Adjusted for better spacing
 
             # Calculate HP ratios
             char1_hp_ratio = max(0, char1_hp / char1.hp)
             char2_hp_ratio = max(0, char2_hp / char2.hp)
+
+            # Determine HP bar colors based on health percentage
+            def get_hp_color(hp_ratio):
+                if hp_ratio > 0.5:
+                    return (0, 255, 0)  # Green
+                elif hp_ratio > 0.25:
+                    return (255, 255, 0)  # Yellow
+                else:
+                    return (255, 0, 0)  # Red
 
             # Character 1 HP bar
             hp1_bar_rect = pygame.Rect(char1_pos[0] - hp_bar_offset_x, char1_pos[1] - hp_bar_offset_y, hp_bar_width, hp_bar_height)
             hp1_fill_width = int(hp_bar_width * char1_hp_ratio)
             hp1_fill_rect = pygame.Rect(char1_pos[0] - hp_bar_offset_x, char1_pos[1] - hp_bar_offset_y, hp1_fill_width, hp_bar_height)
 
-            pygame.draw.rect(self.screen, (255, 255, 255), hp1_bar_rect)
-            pygame.draw.rect(self.screen, (0, 255, 0), hp1_fill_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, max(1, int(3 * scale)))  # Thicker border
+            pygame.draw.rect(self.screen, (80, 80, 80), hp1_bar_rect)  # Dark gray background
+            pygame.draw.rect(self.screen, get_hp_color(char1_hp_ratio), hp1_fill_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), hp1_bar_rect, max(1, int(3 * scale)))  # Black border
 
             # Character 2 HP bar
             hp2_bar_rect = pygame.Rect(char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_bar_offset_y, hp_bar_width, hp_bar_height)
             hp2_fill_width = int(hp_bar_width * char2_hp_ratio)
             hp2_fill_rect = pygame.Rect(char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_bar_offset_y, hp2_fill_width, hp_bar_height)
 
-            pygame.draw.rect(self.screen, (255, 255, 255), hp2_bar_rect)
-            pygame.draw.rect(self.screen, (0, 255, 0), hp2_fill_rect)
-            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, max(1, int(3 * scale)))  # Thicker border
+            pygame.draw.rect(self.screen, (80, 80, 80), hp2_bar_rect)  # Dark gray background
+            pygame.draw.rect(self.screen, get_hp_color(char2_hp_ratio), hp2_fill_rect)
+            pygame.draw.rect(self.screen, (0, 0, 0), hp2_bar_rect, max(1, int(3 * scale)))  # Black border
 
-            # Draw HP text (using regular font for larger display)
+            # Draw HP text with scaled font size
+            hp_font_size = int(36 * scale)  # Base size 36, scaled to screen
+            hp_font = self._create_font(hp_font_size)
+
             hp1_text = f"HP: {char1_hp}/{char1.hp}"
             hp2_text = f"HP: {char2_hp}/{char2.hp}"
-            hp1_surface = self.font.render(hp1_text, True, (0, 0, 0))
-            hp2_surface = self.font.render(hp2_text, True, (0, 0, 0))
-            hp_text_offset_y = int(215 * scale)  # Increased from 205 to 215 to avoid overlap
+            hp1_surface = hp_font.render(hp1_text, True, (255, 255, 255))  # White text for better contrast
+            hp2_surface = hp_font.render(hp2_text, True, (255, 255, 255))  # White text for better contrast
+
+            # Position text above HP bar with more spacing
+            hp_text_offset_y = int(225 * scale)  # Increased from 215 to 225 for more space
+
+            # Draw text with black outline for better visibility
+            outline_offset = max(1, int(2 * scale))
+            for dx in [-outline_offset, 0, outline_offset]:
+                for dy in [-outline_offset, 0, outline_offset]:
+                    if dx != 0 or dy != 0:
+                        outline1 = hp_font.render(hp1_text, True, (0, 0, 0))
+                        outline2 = hp_font.render(hp2_text, True, (0, 0, 0))
+                        self.screen.blit(outline1, (char1_pos[0] - hp_bar_offset_x + dx, char1_pos[1] - hp_text_offset_y + dy))
+                        self.screen.blit(outline2, (char2_pos[0] - hp_bar_offset_x + dx, char2_pos[1] - hp_text_offset_y + dy))
+
+            # Draw main text
             self.screen.blit(hp1_surface, (char1_pos[0] - hp_bar_offset_x, char1_pos[1] - hp_text_offset_y))
             self.screen.blit(hp2_surface, (char2_pos[0] - hp_bar_offset_x, char2_pos[1] - hp_text_offset_y))
 
@@ -800,7 +996,77 @@ class BattleEngine:
 
         except Exception as e:
             logger.error(f"Error drawing damage text: {e}")
-    
+
+    def _draw_action_text(self, turn: BattleTurn, position: Tuple[int, int], display_scale: float = 1.0):
+        """Draw action text above attacker (攻撃！, クリティカル！, etc.)"""
+        try:
+            # Determine action text and color based on turn type
+            if turn.is_miss:
+                action_text = "ミス！"
+                action_color = (128, 128, 128)  # Gray
+                font_size = int(48 * display_scale)
+            elif turn.is_guard_break and turn.is_critical:
+                action_text = "ガードブレイク！\nクリティカル！"
+                action_color = (255, 100, 255)  # Magenta (both effects)
+                font_size = int(52 * display_scale)
+            elif turn.is_guard_break:
+                action_text = "ガードブレイク！"
+                action_color = (100, 150, 255)  # Blue
+                font_size = int(52 * display_scale)
+            elif turn.is_critical:
+                action_text = "クリティカル！"
+                action_color = (255, 215, 0)  # Gold
+                font_size = int(56 * display_scale)
+            elif turn.action_type == "magic":
+                action_text = "魔法攻撃！"
+                action_color = (138, 43, 226)  # Purple
+                font_size = int(52 * display_scale)
+            else:  # Normal attack
+                action_text = "攻撃！"
+                action_color = (255, 140, 0)  # Orange
+                font_size = int(48 * display_scale)
+
+            # Create font for action text
+            action_font = self._create_font(font_size)
+
+            # Handle multi-line text (for guard break + critical)
+            lines = action_text.split('\n')
+            total_height = 0
+            surfaces = []
+
+            for line in lines:
+                surface = action_font.render(line, True, action_color)
+                surfaces.append(surface)
+                total_height += surface.get_height()
+
+            # Add floating animation
+            float_offset = int(15 * display_scale * math.sin(pygame.time.get_ticks() * 0.01))
+            base_y = position[1] - int(220 * display_scale) - float_offset
+
+            # Draw each line with outline
+            current_y = base_y - total_height // 2
+            for surface in surfaces:
+                text_pos = (position[0] - surface.get_width() // 2, current_y)
+
+                # Draw outline for better visibility
+                try:
+                    outline_surface = action_font.render(surface.get_at((0, 0)) and action_text or lines[surfaces.index(surface)], True, (0, 0, 0))
+                    outline_offset = int(2 * display_scale)
+                    for dx in [-outline_offset, 0, outline_offset]:
+                        for dy in [-outline_offset, 0, outline_offset]:
+                            if dx != 0 or dy != 0:
+                                # Re-render the line for outline
+                                outline = action_font.render(lines[surfaces.index(surface)], True, (0, 0, 0))
+                                self.screen.blit(outline, (text_pos[0] + dx, text_pos[1] + dy))
+                except:
+                    pass  # Skip outline if it fails
+
+                self.screen.blit(surface, text_pos)
+                current_y += surface.get_height()
+
+        except Exception as e:
+            logger.error(f"Error drawing action text: {e}")
+
     def _show_battle_start_screen(self, char1: Character, char2: Character):
         """Show battle start screen with VS display and countdown"""
         if not self.screen:
@@ -823,7 +1089,10 @@ class BattleEngine:
                     pygame.draw.line(vs_bg, (color_value, color_value, color_value + 20), (0, y), (screen_width, y))
 
             # Calculate positions for character circles
-            circle_radius = int(150)
+            # Scale circle radius based on screen size
+            base_circle_radius = 250  # Increased from 150 to 250 for larger circles
+            screen_scale = min(screen_width / 1920, screen_height / 1080)  # Base resolution: 1920x1080
+            circle_radius = int(base_circle_radius * screen_scale)
             left_circle_x = screen_width // 5  # Move left character more to the left
             right_circle_x = screen_width * 4 // 5  # Move right character more to the right
             circle_y = screen_height // 2
@@ -843,8 +1112,8 @@ class BattleEngine:
 
                 # Draw character 1 (left)
                 if char1_sprite:
-                    # Scale to fit in circle
-                    char_size = circle_radius * 2 - 40  # Leave some padding
+                    # Scale to fit in circle - increased size by reducing padding
+                    char_size = circle_radius * 2 - 10  # Reduced padding from 40 to 10 for larger images
                     original_w, original_h = char1_sprite.get_size()
                     scale_factor = min(char_size / original_w, char_size / original_h)
                     new_w = int(original_w * scale_factor)
@@ -855,8 +1124,8 @@ class BattleEngine:
 
                 # Draw character 2 (right)
                 if char2_sprite:
-                    # Scale to fit in circle
-                    char_size = circle_radius * 2 - 40
+                    # Scale to fit in circle - increased size by reducing padding
+                    char_size = circle_radius * 2 - 10  # Reduced padding from 40 to 10 for larger images
                     original_w, original_h = char2_sprite.get_size()
                     scale_factor = min(char_size / original_w, char_size / original_h)
                     new_w = int(original_w * scale_factor)
@@ -866,11 +1135,14 @@ class BattleEngine:
                     self.screen.blit(scaled_char2, char2_pos)
 
                 # Draw character names below circles
-                name_font = self._create_font(36)
+                # Scale font size based on screen size
+                name_font_size = int(36 * screen_scale * 1.5)  # Increased by 1.5x
+                name_font = self._create_font(name_font_size)
                 name1_surface = name_font.render(char1.name, True, (255, 255, 255))
                 name2_surface = name_font.render(char2.name, True, (255, 255, 255))
-                name1_rect = name1_surface.get_rect(center=(left_circle_x, circle_y + circle_radius + 40))
-                name2_rect = name2_surface.get_rect(center=(right_circle_x, circle_y + circle_radius + 40))
+                name_y_offset = int(40 * screen_scale)
+                name1_rect = name1_surface.get_rect(center=(left_circle_x, circle_y + circle_radius + name_y_offset))
+                name2_rect = name2_surface.get_rect(center=(right_circle_x, circle_y + circle_radius + name_y_offset))
 
                 # Draw with outline
                 for dx in [-2, 0, 2]:
@@ -909,7 +1181,7 @@ class BattleEngine:
             pygame.draw.circle(self.screen, (255, 255, 255), (right_circle_x, circle_y), circle_radius)
 
             if char1_sprite:
-                char_size = circle_radius * 2 - 40
+                char_size = circle_radius * 2 - 10  # Reduced padding from 40 to 10 for larger images
                 original_w, original_h = char1_sprite.get_size()
                 scale_factor = min(char_size / original_w, char_size / original_h)
                 new_w = int(original_w * scale_factor)
@@ -919,7 +1191,7 @@ class BattleEngine:
                 self.screen.blit(scaled_char1, char1_pos)
 
             if char2_sprite:
-                char_size = circle_radius * 2 - 40
+                char_size = circle_radius * 2 - 10  # Reduced padding from 40 to 10 for larger images
                 original_w, original_h = char2_sprite.get_size()
                 scale_factor = min(char_size / original_w, char_size / original_h)
                 new_w = int(original_w * scale_factor)
@@ -931,8 +1203,8 @@ class BattleEngine:
             # Draw names
             name1_surface = name_font.render(char1.name, True, (255, 255, 255))
             name2_surface = name_font.render(char2.name, True, (255, 255, 255))
-            name1_rect = name1_surface.get_rect(center=(left_circle_x, circle_y + circle_radius + 40))
-            name2_rect = name2_surface.get_rect(center=(right_circle_x, circle_y + circle_radius + 40))
+            name1_rect = name1_surface.get_rect(center=(left_circle_x, circle_y + circle_radius + name_y_offset))
+            name2_rect = name2_surface.get_rect(center=(right_circle_x, circle_y + circle_radius + name_y_offset))
 
             for dx in [-2, 0, 2]:
                 for dy in [-2, 0, 2]:
@@ -1053,10 +1325,22 @@ class BattleEngine:
             # Try to load sprite image (background removed) first, fallback to original image
             image_path = character.sprite_path or character.image_path
             if image_path:
+                # Check if it's a URL (http:// or https://)
+                if image_path.startswith('http://') or image_path.startswith('https://'):
+                    # URL detected - try to find local cached sprite instead
+                    sprite_cache_path = Settings.SPRITES_DIR / f"char_{character.id}_sprite.png"
+                    if sprite_cache_path.exists():
+                        logger.info(f"Using cached sprite for character {character.name}: {sprite_cache_path}")
+                        image_path = str(sprite_cache_path)
+                    else:
+                        logger.warning(f"Character {character.name} has URL path but no local sprite cache found")
+                        logger.warning(f"  URL: {image_path}")
+                        logger.warning(f"  Expected cache: {sprite_cache_path}")
+                        return None
                 # If it's a relative path, make it relative to the project root
-                if not Path(image_path).is_absolute():
+                elif not Path(image_path).is_absolute():
                     image_path = str(Path.cwd() / image_path)
-                
+
                 if Path(image_path).exists():
                     try:
                         sprite = pygame.image.load(image_path)
@@ -1081,13 +1365,21 @@ class BattleEngine:
             return None
 
     def _create_font(self, size: int) -> pygame.font.Font:
-        """Create a font with Japanese support at the specified size"""
+        """Create a font with Japanese support at the specified size (with caching for performance)"""
+        # Check cache first
+        if size in self._font_cache:
+            return self._font_cache[size]
+
         try:
             if self.japanese_font_path:
-                return pygame.font.Font(self.japanese_font_path, size)
+                font = pygame.font.Font(self.japanese_font_path, size)
             else:
                 # Fallback to default font if no Japanese font available
-                return pygame.font.Font(None, size)
+                font = pygame.font.Font(None, size)
+
+            # Cache the font for future use
+            self._font_cache[size] = font
+            return font
         except Exception as e:
             logger.warning(f"Failed to create font with size {size}: {e}")
             return self.font  # Return the default font as fallback
@@ -1178,7 +1470,7 @@ class BattleEngine:
 
             # Draw character images side by side (in the middle area)
             char_display_size = int(180 * scale)
-            char_y_winner = int(220 * scale_y)
+            char_y_winner = int(280 * scale_y)  # Moved down from 220 to 280
             char_x_offset = int(220 * scale_x)
 
             # Winner character (left side, larger)
@@ -1207,7 +1499,7 @@ class BattleEngine:
                     # Draw crown symbol above winner (using simple shapes instead of emoji)
                     crown_center_x = winner_pos[0] + new_w // 2
                     crown_center_y = winner_pos[1] - int(40 * scale)
-                    crown_size = scale
+                    crown_size = scale * 2.0  # Doubled crown size from scale to scale * 2.0
 
                     # Draw crown shape with triangles
                     crown_points = [
@@ -1238,7 +1530,7 @@ class BattleEngine:
                         scaled_loser = pygame.transform.scale(loser_sprite, (new_w, new_h))
 
                         # Draw white background for character
-                        char_y_loser = int(250 * scale_y)
+                        char_y_loser = int(310 * scale_y)  # Moved down from 250 to 310
                         loser_x_offset = int(80 * scale_x)
                         loser_pos = (screen_width // 2 + loser_x_offset, char_y_loser)
                         loser_border_padding = int(5 * scale)
@@ -1338,20 +1630,21 @@ class BattleEngine:
             button_text_rect = button_text.get_rect(center=button_rect.center)
             self.screen.blit(button_text, button_text_rect)
 
-            # Draw instruction text
-            instruction_text = "クリックまたはスペースキーで閉じる"
+            # Draw instruction text with countdown
             instruction_font = self._create_font(int(20 * scale))
 
-            instruction_surface = instruction_font.render(instruction_text, True, (180, 180, 200))
-            instruction_rect = instruction_surface.get_rect(center=(screen_width // 2, button_y - int(15 * scale_y)))
-            self.screen.blit(instruction_surface, instruction_rect)
-            
             pygame.display.flip()
-            
-            # Wait for user input
+
+            # Wait for user input or auto-close after 5 seconds
             waiting = True
             clock = pygame.time.Clock()
+            auto_close_time = 5.0  # Auto-close after 5 seconds
+            elapsed_time = 0.0
+
             while waiting:
+                dt = clock.tick(30) / 1000.0  # Delta time in seconds
+                elapsed_time += dt
+
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         waiting = False
@@ -1367,8 +1660,35 @@ class BattleEngine:
                         else:
                             # Clicked anywhere else - also close
                             waiting = False
-                            
-                clock.tick(30)  # Limit to 30 FPS while waiting
+
+                # Auto-close after timeout
+                if elapsed_time >= auto_close_time:
+                    waiting = False
+
+                # Update countdown display
+                remaining_time = max(0, auto_close_time - elapsed_time)
+                if remaining_time > 0:
+                    instruction_text = f"クリックまたはスペースキーで閉じる ({remaining_time:.1f}秒後に自動で閉じます)"
+                else:
+                    instruction_text = "閉じています..."
+
+                # Redraw instruction text with countdown
+                instruction_surface = instruction_font.render(instruction_text, True, (180, 180, 200))
+                instruction_rect = instruction_surface.get_rect(center=(screen_width // 2, button_y - int(15 * scale_y)))
+
+                # Clear the instruction area and redraw
+                clear_rect = pygame.Rect(0, button_y - int(30 * scale_y), screen_width, int(30 * scale_y))
+
+                # Redraw the background for this area
+                for y in range(clear_rect.top, clear_rect.bottom):
+                    alpha = int(230 * (y / screen_height))
+                    line_surface = pygame.Surface((screen_width, 1))
+                    line_surface.set_alpha(alpha)
+                    line_surface.fill((20, 20, 40))
+                    self.screen.blit(line_surface, (0, y))
+
+                self.screen.blit(instruction_surface, instruction_rect)
+                pygame.display.flip()
             
         except Exception as e:
             logger.error(f"Error showing battle result: {e}")

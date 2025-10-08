@@ -142,33 +142,38 @@ class AIAnalyzer:
 あなたは世界的に有名なゲームデザイナーとバランス調整の専門家です。
 手描きキャラクターの絵を詳細に分析し、視覚的特徴からゲーム内での能力値を科学的に決定してください。
 
+## キャラクター名の生成:
+- 見た目の特徴を反映した日本語の名前を付けてください
+- 10文字以内で覚えやすい名前にしてください
+- 例: 「炎の戦士」「氷の魔法使い」「疾風の剣士」「鋼鉄の騎士」など
+
 ## 詳細分析基準:
 
-### 1. 体力 (HP: 50-150)
+### 1. 体力 (HP: 10-200)
 - 体格の大きさ: 大きい→高HP、小さい→低HP
 - 体の厚み: 厚い・筋肉質→高HP、細い→低HP
 - 安定感: どっしりした→高HP、華奢な→低HP
-- 防御的要素: 鎧・厚い服→HP+10-20
+- 防御的要素: 鎧・厚い服→HP+10-30
 
-### 2. 攻撃力 (Attack: 30-120)
-- 武器: 剣・斧・槍→+20-40、素手→基本値
-- 筋肉: 明らかに筋肉質→+15-25
-- 爪・牙: 鋭い爪や牙→+10-20
-- 攻撃的ポーズ: 攻撃姿勢→+5-15
-- 顔の表情: 凶暴・怒り→+5-10
+### 2. 攻撃力 (Attack: 10-150)
+- 武器: 剣・斧・槍→+30-50、素手→基本値
+- 筋肉: 明らかに筋肉質→+20-35
+- 爪・牙: 鋭い爪や牙→+15-25
+- 攻撃的ポーズ: 攻撃姿勢→+10-20
+- 顔の表情: 凶暴・怒り→+5-15
 
-### 3. 防御力 (Defense: 20-100)
+### 3. 防御力 (Defense: 10-100)
 - 鎧・防具: 重装鎧→+30-40、軽装→+10-20
 - 盾: 大盾→+20-30、小盾→+10-15
 - 体の硬さ: 岩石風→+20-30、金属風→+25-35
 - 守備姿勢: 守備的ポーズ→+5-15
 
-### 4. 素早さ (Speed: 40-130)
+### 4. 素早さ (Speed: 10-100)
 - 体型: スリム→高Speed、重い→低Speed
-- 手足の長さ: 長い手足→+20-30
+- 手足の長さ: 長い手足→+15-25
 - 動的ポーズ: 走る・跳ぶポーズ→+15-25
 - 軽装備: 軽い装備→+10-20
-- 翼や風の要素: +20-40
+- 翼や風の要素: +20-30
 
 ### 5. 魔法力 (Magic: 10-100)
 - 杖・魔法道具: +30-50
@@ -177,6 +182,17 @@ class AIAnalyzer:
 - オーラ・光の表現: +10-30
 - 魔法的な色彩: 紫・青・金→+5-15
 
+### 6. 運 (Luck: 0-100)
+- 幸運のシンボル: クローバー・星→+30-50
+- 明るい表情: 笑顔・楽しそう→+20-30
+- キラキラした装飾: +15-25
+- 光や輝きの表現: +10-20
+- 可愛らしさ・愛嬌: +10-20
+
+## 重要な制約:
+**全ステータスの合計値は必ず350以下にしてください**
+合計が350を超える場合は、各ステータスを比例的に減らして調整してください。
+
 ## 追加考慮事項:
 - 絵の上手さは能力に影響しません
 - バランス: 総合値が極端に高い/低い場合は調整
@@ -184,7 +200,7 @@ class AIAnalyzer:
 - 説明文: そのキャラの最も印象的な特徴を30文字以内で
 
 ## 出力形式:
-各ステータスの数値と、分析理由を含んだ簡潔な説明文を返してください。
+キャラクター名、各ステータスの数値（合計350以下）、分析理由を含んだ簡潔な説明文を返してください。
         """
     
     def _get_simple_analysis_prompt(self) -> str:
@@ -192,12 +208,19 @@ class AIAnalyzer:
         return """
 手描きキャラクターを見て、ゲーム用のステータスを決めてください。
 
+名前:
+- 見た目の特徴を反映した日本語の名前（10文字以内）
+- 例: 「勇者」「魔法使い」「剣士」など
+
 判定基準:
-- HP (50-150): 体の大きさ・頑丈さ
-- Attack (30-120): 武器・筋肉・攻撃的な見た目
-- Defense (20-100): 鎧・盾・体の硬さ
-- Speed (40-130): 体型・手足の長さ・軽やかさ
+- HP (10-200): 体の大きさ・頑丈さ
+- Attack (10-150): 武器・筋肉・攻撃的な見た目
+- Defense (10-100): 鎧・盾・体の硬さ
+- Speed (10-100): 体型・手足の長さ・軽やかさ
 - Magic (10-100): 杖・魔法的な装飾・神秘性
+- Luck (0-100): 幸運のシンボル・明るい表情・キラキラした装飾
+
+**重要: 全ステータスの合計は必ず350以下にしてください**
 
 説明は30文字以内でキャラの特徴を表現してください。
         """
@@ -205,15 +228,23 @@ class AIAnalyzer:
     def _validate_and_adjust_stats(self, stats_data: Dict[str, Any]) -> Dict[str, Any]:
         """Validate and adjust generated stats to ensure they're within acceptable ranges"""
         try:
+            # Validate and ensure name exists
+            if 'name' not in stats_data or not stats_data['name']:
+                stats_data['name'] = "未知のキャラクター"
+            else:
+                # Trim name to 30 characters max
+                stats_data['name'] = str(stats_data['name'])[:30]
+
             # Define valid ranges
             ranges = {
-                'hp': (50, 150),
-                'attack': (30, 120),
-                'defense': (20, 100),
-                'speed': (40, 130),
-                'magic': (10, 100)
+                'hp': (10, 200),
+                'attack': (10, 150),
+                'defense': (10, 100),
+                'speed': (10, 100),
+                'magic': (10, 100),
+                'luck': (0, 100)
             }
-            
+
             # Validate and clamp values
             for stat, (min_val, max_val) in ranges.items():
                 if stat in stats_data:
@@ -225,8 +256,19 @@ class AIAnalyzer:
                         stats_data[stat] = max(min_val, min(max_val, int(value)))
                 else:
                     # Generate default value if missing
-                    stats_data[stat] = (min_val + max_val) // 2
-            
+                    if stat == 'luck':
+                        stats_data[stat] = 50  # Default luck
+                    else:
+                        stats_data[stat] = (min_val + max_val) // 2
+
+            # Check total stats and adjust if needed
+            total_stats = stats_data['hp'] + stats_data['attack'] + stats_data['defense'] + stats_data['speed'] + stats_data['magic'] + stats_data['luck']
+            if total_stats > 350:
+                logger.warning(f"Total stats ({total_stats}) exceeds 350, adjusting proportionally")
+                scale_factor = 350 / total_stats
+                for stat in ['hp', 'attack', 'defense', 'speed', 'magic', 'luck']:
+                    stats_data[stat] = max(ranges[stat][0], int(stats_data[stat] * scale_factor))
+
             # Ensure description exists and is reasonable
             if 'description' not in stats_data or not stats_data['description']:
                 stats_data['description'] = "個性的なキャラクター"
@@ -260,20 +302,22 @@ class AIAnalyzer:
             # Simple image-based heuristics
             image = Image.open(image_path)
             width, height = image.size
-            
+
             # Convert to numpy array for basic analysis
             img_array = np.array(image)
-            
+
             # Basic heuristics based on image properties
             base_stats = {
-                'hp': 100,  # Default middle value
-                'attack': 75,
-                'defense': 60,
-                'speed': 85,
+                'name': "未知のキャラクター",
+                'hp': 80,  # Default values within new ranges
+                'attack': 60,
+                'defense': 50,
+                'speed': 55,
                 'magic': 55,
+                'luck': 50,
                 'description': "未知のキャラクター"
             }
-            
+
             # Adjust based on image size (larger images might indicate larger characters)
             if width * height > 500000:  # Large image
                 base_stats['hp'] += 20
@@ -283,14 +327,14 @@ class AIAnalyzer:
                 base_stats['hp'] -= 15
                 base_stats['speed'] += 15
                 base_stats['magic'] += 10
-            
+
             # Add some randomness to make characters unique
             import random
-            for stat in ['hp', 'attack', 'defense', 'speed', 'magic']:
+            for stat in ['hp', 'attack', 'defense', 'speed', 'magic', 'luck']:
                 variation = random.randint(-15, 15)
                 base_stats[stat] += variation
-            
-            # Validate the generated stats
+
+            # Validate the generated stats (includes total check)
             validated_stats = self._validate_and_adjust_stats(base_stats)
             return CharacterStats(**validated_stats)
             
@@ -301,11 +345,13 @@ class AIAnalyzer:
     def _get_default_stats(self) -> Dict[str, Any]:
         """Get default balanced stats"""
         return {
-            'hp': 100,
-            'attack': 75,
-            'defense': 60,
-            'speed': 85,
+            'name': "バランス戦士",
+            'hp': 70,
+            'attack': 60,
+            'defense': 50,
+            'speed': 55,
             'magic': 55,
+            'luck': 50,
             'description': "バランス型キャラクター"
         }
     
