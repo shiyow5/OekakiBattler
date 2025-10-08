@@ -1635,10 +1635,10 @@ class BattleEngine:
 
             pygame.display.flip()
 
-            # Wait for user input or auto-close after 5 seconds
+            # Wait for user input or auto-close after 10 seconds
             waiting = True
             clock = pygame.time.Clock()
-            auto_close_time = 5.0  # Auto-close after 5 seconds
+            auto_close_time = 10.0  # Auto-close after 10 seconds
             elapsed_time = 0.0
 
             while waiting:
