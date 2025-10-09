@@ -1820,9 +1820,13 @@ class SheetsManager:
                 logger.warning("Story sheet is not available (offline mode or initialization failed)")
                 return None
 
+            logger.info(f"Getting story boss Lv{level}...")
             records = self.story_sheet.get_all_records()
+            logger.info(f"Found {len(records)} records in StoryBosses sheet")
+            
             for record in records:
                 if record.get('Level') == level:
+                    logger.info(f"Found matching record: {record}")
                     image_url = str(record.get('Image URL', '')) if record.get('Image URL') else ''
                     sprite_url = str(record.get('Sprite URL', '')) if record.get('Sprite URL') else ''
 
@@ -1848,10 +1852,14 @@ class SheetsManager:
                         image_path=image_url,
                         sprite_path=sprite_path
                     )
+            
+            logger.info(f"No boss found for Lv{level}")
             return None
 
         except Exception as e:
             logger.error(f"Error getting story boss: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
 
     def save_story_boss(self, boss) -> bool:
@@ -1887,11 +1895,11 @@ class SheetsManager:
                         boss.description
                     ]]
                     self.story_sheet.update(f'A{row_num}:K{row_num}', values)
-                    logger.info(f"Updated story boss Lv{boss.level}")
+                    logger.info(f"Updated story boss Lv{boss.level}: HP={boss.hp}, ATK={boss.attack}, DEF={boss.defense}, SPD={boss.speed}, MAG={boss.magic}, LCK={boss.luck}")
                     return True
 
             # Add new boss
-            values = [[
+            row_values = [
                 boss.level,
                 boss.name,
                 boss.image_path or '',
@@ -1903,13 +1911,15 @@ class SheetsManager:
                 boss.magic,
                 boss.luck,
                 boss.description
-            ]]
-            self.story_sheet.append_row(values[0])
-            logger.info(f"Added new story boss Lv{boss.level}")
+            ]
+            self.story_sheet.append_row(row_values)
+            logger.info(f"Added new story boss Lv{boss.level}: HP={boss.hp}, ATK={boss.attack}, DEF={boss.defense}, SPD={boss.speed}, MAG={boss.magic}, LCK={boss.luck}")
             return True
 
         except Exception as e:
             logger.error(f"Error saving story boss: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
 
     def get_story_progress(self, character_id: str):
@@ -2035,6 +2045,10 @@ class SheetsManager:
             try:
                 self.story_sheet = self.sheet.worksheet("StoryBosses")
                 logger.info("StoryBosses sheet found")
+                
+                # Verify and fix headers if needed
+                self._ensure_story_sheet_headers()
+                
             except:
                 # Create the sheet if it doesn't exist
                 self.story_sheet = self.sheet.add_worksheet(title="StoryBosses", rows=100, cols=11)
@@ -2045,6 +2059,29 @@ class SheetsManager:
         except Exception as e:
             logger.error(f"Error initializing story sheet: {e}")
             self.story_sheet = None
+    
+    def _ensure_story_sheet_headers(self):
+        """Ensure StoryBosses sheet has correct headers"""
+        try:
+            if not self.story_sheet:
+                return
+            
+            expected_headers = ['Level', 'Name', 'Image URL', 'Sprite URL', 'HP', 'Attack', 'Defense', 'Speed', 'Magic', 'Luck', 'Description']
+            current_headers = self.story_sheet.row_values(1)
+            
+            # Check if headers are correct
+            if current_headers != expected_headers:
+                logger.warning(f"StoryBosses headers incorrect. Current: {current_headers}")
+                logger.info(f"Fixing StoryBosses headers to: {expected_headers}")
+                self.story_sheet.update('A1:K1', [expected_headers])
+                logger.info("StoryBosses headers updated successfully")
+            else:
+                logger.info("StoryBosses headers are correct")
+        
+        except Exception as e:
+            logger.error(f"Error ensuring story sheet headers: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def _init_story_progress_sheet(self):
         """Initialize story progress worksheet"""

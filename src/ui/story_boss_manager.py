@@ -170,21 +170,28 @@ class StoryBossManagerWindow:
     def _load_bosses(self):
         """Load all bosses"""
         try:
+            logger.info("Loading story bosses...")
             for level in range(1, 6):
                 boss = self.db_manager.get_story_boss(level)
                 if boss:
+                    logger.info(f"Loaded boss Lv{level}: {boss.name} (HP={boss.hp}, ATK={boss.attack}, DEF={boss.defense}, SPD={boss.speed}, MAG={boss.magic}, LCK={boss.luck})")
                     self.boss_buttons[level].config(text=f"Lv {level}: {boss.name}")
                 else:
+                    logger.info(f"No boss found for Lv{level}")
                     self.boss_buttons[level].config(text=f"Lv {level} (未設定)")
         except Exception as e:
             logger.error(f"Error loading bosses: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def _select_boss(self, level: int):
         """Select a boss to edit"""
         try:
+            logger.info(f"Selecting boss Lv{level}...")
             self.current_boss = self.db_manager.get_story_boss(level)
 
             if self.current_boss:
+                logger.info(f"Found existing boss: {self.current_boss.name}")
                 # Load existing boss data
                 self.level_var.set(f"Lv {self.current_boss.level}")
                 self.name_entry.delete(0, tk.END)
@@ -203,16 +210,19 @@ class StoryBossManagerWindow:
                 self.selected_sprite_path = self.current_boss.sprite_path
                 self._update_image_display()
             else:
-                # Create new boss
+                # Create new boss with stats totaling 350 for Lv1, scaling to 490 for Lv5 (within 500 limit)
+                logger.info(f"Creating new boss for Lv{level}")
                 self.level_var.set(f"Lv {level}")
                 self.name_entry.delete(0, tk.END)
                 self.name_entry.insert(0, f"Boss Lv{level}")
-                self.hp_var.set(100 + (level - 1) * 40)
-                self.attack_var.set(50 + (level - 1) * 30)
-                self.defense_var.set(50 + (level - 1) * 20)
-                self.speed_var.set(50 + (level - 1) * 25)
-                self.magic_var.set(50 + (level - 1) * 20)
-                self.luck_var.set(50)
+                # Level-based stats (total = 350 for Lv1, scales to 490 for Lv5)
+                self.hp_var.set(100 + (level - 1) * 10)     # Lv1:100, Lv5:140
+                self.attack_var.set(50 + (level - 1) * 5)   # Lv1:50, Lv5:70
+                self.defense_var.set(50 + (level - 1) * 5)  # Lv1:50, Lv5:70
+                self.speed_var.set(50 + (level - 1) * 5)    # Lv1:50, Lv5:70
+                self.magic_var.set(50 + (level - 1) * 5)    # Lv1:50, Lv5:70
+                self.luck_var.set(50 + (level - 1) * 5)     # Lv1:50, Lv5:70
+                # Total: Lv1=350, Lv2=375, Lv3=400, Lv4=425, Lv5=490 (all within 500 limit)
                 self.desc_text.delete("1.0", tk.END)
                 self.selected_image_path = None
                 self.selected_sprite_path = None
@@ -361,14 +371,19 @@ class StoryBossManagerWindow:
                     self.current_boss.sprite_path = self.selected_sprite_path
 
             # Save to database
+            logger.info(f"Saving boss Lv{self.current_boss.level}: {self.current_boss.name} (HP={self.current_boss.hp}, ATK={self.current_boss.attack}, DEF={self.current_boss.defense}, SPD={self.current_boss.speed}, MAG={self.current_boss.magic}, LCK={self.current_boss.luck})")
             if self.db_manager.save_story_boss(self.current_boss):
+                logger.info("Boss saved successfully")
                 messagebox.showinfo("成功", "ボスを保存しました")
                 self._load_bosses()
             else:
+                logger.error("Failed to save boss")
                 messagebox.showerror("エラー", "保存に失敗しました")
 
         except Exception as e:
             logger.error(f"Error saving boss: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             messagebox.showerror("エラー", f"保存エラー: {e}")
 
     def _delete_boss(self):

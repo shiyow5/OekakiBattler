@@ -85,7 +85,7 @@ class ImageProcessor:
             gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
 
             # Threshold to create mask (assuming white background)
-            _, mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+            _, mask = cv2.threshold(gray, 245, 255, cv2.THRESH_BINARY_INV)
 
             # Apply mask to create result
             result = cv2.bitwise_and(image_bgr, image_bgr, mask=mask)
