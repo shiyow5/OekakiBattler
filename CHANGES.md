@@ -1,5 +1,287 @@
 # 変更履歴 (CHANGES.md)
 
+## 2025-10-09 (修正64): ステータス生成・検証ロジックの修正とデータ整合性の向上
+
+### 変更内容
+AI生成ステータスの検証ロジックを修正し、StoryProgressシートのデータ整合性を向上させました。主に、ステータス合計350制限の適切な適用、Luck値の正しい使用、Google Sheetのデータクリーンアップ機能を追加しました。
+
+### 主な変更
+
+#### 1. AIステータス生成の350制限の厳密な適用
+
+**問題点:**
+- AIが予測したステータスの合計が350を超えることがあり、Characterモデルのバリデーションエラーが発生
+- `ai_analyzer.py`の`_validate_and_adjust_stats()`に矛盾する2つの調整処理が存在
+  - 最初の処理: 6つのステータス全体で350制限
+  - 2番目の処理: luckを除外した5つのステータスで500制限（矛盾）
+
+**修正内容:**
+```python
+# src/services/ai_analyzer.py - _validate_and_adjust_stats()
+
+# Before: 矛盾する2つの調整処理
+total_stats = hp + attack + defense + speed + magic + luck
+if total_stats > 350:
+    scale_factor = 350 / total_stats
+    # ... 調整 ...
+
+# その後、luckを除外して再計算（矛盾）
+total_stats = hp + attack + defense + speed + magic  # luckを除外
+if total_stats > 500:  # ← これにより350を超える可能性
+
+# After: 統一された350制限
+total_stats = hp + attack + defense + speed + magic + luck
+MAX_TOTAL_STATS = 350
+
+if total_stats > MAX_TOTAL_STATS:
+    scale_factor = MAX_TOTAL_STATS / total_stats
+    # 全ステータスを比例的に調整
+    # 四捨五入後も350を超えないように微調整
+```
+
+**効果:**
+- ステータス合計が必ず350以下に収まる
+- Characterモデルのバリデーションエラーが解消
+- ステータスバランスが保たれたまま調整される
+
+#### 2. Luck値のAI生成値使用
+
+**問題点:**
+- `sheets_manager.py`の`_generate_stats_for_character()`でCharacterオブジェクト作成時にluckパラメータを渡していない
+- 結果、すべてのキャラクターがデフォルトのluck=50になっていた
+- AIプロンプトには運の分析基準があるのに活用されていなかった
+
+**修正内容:**
+```python
+# src/services/sheets_manager.py - _generate_stats_for_character()
+
+# Before:
+analyzed_char = Character(
+    id=str(char_id),
+    name=char_stats.name,
+    hp=hp,
+    attack=attack,
+    defense=defense,
+    speed=speed,
+    magic=magic,
+    # luck が抜けていた！
+    description=char_stats.description,
+    ...
+)
+
+# After:
+luck = char_stats.luck if hasattr(char_stats, 'luck') else 50
+
+analyzed_char = Character(
+    id=str(char_id),
+    name=char_stats.name,
+    hp=hp,
+    attack=attack,
+    defense=defense,
+    speed=speed,
+    magic=magic,
+    luck=luck,  # AI生成値を使用
+    description=char_stats.description,
+    ...
+)
+```
+
+**効果:**
+- AIが分析した適切なLuck値が使用される
+- 幸運のシンボル（星、クローバー）や明るい表情のキャラは高いLuck値に
+- キャラクターの多様性が向上
+
+#### 3. StoryProgress Victoriesカラムの計算修正
+
+**問題点:**
+- Victoriesカラムに撃破したボスレベルのリスト（"1,2,3"）を保存していた
+- スプレッドシートにリストを文字列として保存するのは複雑でエラーが発生しやすい
+- カラム名「Victories」は勝利数を意味するため、数値が適切
+
+**修正内容:**
+```python
+# Before: 8カラムフォーマット
+Character ID | ... | Victories | Defeated Bosses | Attempts | Last Played
+     1       | ... |     3     |     1,2,3       |    5     | 2025-10-09...
+
+# After: 7カラムフォーマット（簡素化）
+Character ID | ... | Victories | Attempts | Last Played
+     1       | ... |     3     |    5     | 2025-10-09...
+
+# 保存時
+victories_count = len(progress.victories)  # リストから数値へ
+
+# 読み込み時（victoriesリストを再構築）
+current_level = 3
+victories = list(range(1, current_level))  # [1, 2]
+```
+
+**効果:**
+- Victoriesカラムに正しく勝利数（数値）が表示される
+- データ構造がシンプルで理解しやすい
+- パースエラーのリスクがゼロ
+
+#### 4. Google Sheetデータずれの自動修正
+
+**問題点:**
+- StoryProgressシートのヘッダーが8カラム（"Last Played"が重複）
+- データの列位置がずれて正しく読み書きできない
+- 手動修正が必要だった
+
+**修正内容:**
+```python
+# src/services/sheets_manager.py
+
+def _ensure_story_progress_headers(self):
+    # 8カラム以上を検出
+    if len(current_headers) >= 8:
+        needs_migration = True
+    
+    # データマイグレーション実行
+    self._migrate_story_progress_data_to_simple_format()
+    
+    # ヘッダー更新
+    self.story_progress_sheet.update('A1:G1', [expected_headers])
+    
+    # 余分な列（H列以降）をクリア
+    if len(current_headers) > 7:
+        self.story_progress_sheet.batch_clear([clear_range])
+
+def _migrate_story_progress_data_to_simple_format(self):
+    # 柔軟なデータ解析（8カラム、7カラム、不完全データに対応）
+    # Current Levelから正しいVictories数を計算
+    # 欠損データを適切な値で補完
+```
+
+**効果:**
+- 起動時に自動的にヘッダーとデータを修正
+- 手動操作不要
+- データの整合性が保証される
+
+#### 5. オートストーリーモード中の進行状況保存修正
+
+**問題点:**
+- オートストーリーモード実行中に途中で登録されたキャラクターのバトル結果がGoogle Sheetに保存されない
+- ヘッダーのずれが原因で`get_all_records`が失敗
+- 既存レコードが見つからず更新処理がスキップされる
+
+**修正内容:**
+```python
+# src/services/sheets_manager.py - save_story_progress()
+
+def save_story_progress(self, progress) -> bool:
+    # 保存前に必ずヘッダーが正しいことを確認（初回のみ）
+    if not hasattr(self, 'story_progress_headers_verified') or not self.story_progress_headers_verified:
+        self._ensure_story_progress_headers()
+        self.story_progress_headers_verified = True
+    
+    # 正しい7カラムフォーマットでデータを保存
+```
+
+**効果:**
+- 途中から登録されたキャラクターの進行状況も正しく保存される
+- パフォーマンス最適化（ヘッダーチェックは初回のみ）
+- 既存・新規キャラクターが同じように扱われる
+
+#### 6. 存在しないキャラクターのStoryProgress行を自動削除
+
+**問題点:**
+- キャラクターを削除してもStoryProgressシートにレコードが残る
+- データの不整合が発生
+- 手動でのクリーンアップが必要
+
+**修正内容:**
+```python
+# src/services/sheets_manager.py
+
+def _cleanup_orphaned_story_progress(self):
+    """Remove story progress records for characters that no longer exist"""
+    # 全既存キャラクターIDを取得
+    all_characters = self.get_all_characters()
+    existing_char_ids = {str(char.id) for char in all_characters}
+    
+    # StoryProgressシートの各行をチェック
+    for row in all_values:
+        character_id = row[0]
+        if character_id not in existing_char_ids:
+            rows_to_delete.append(row_num)
+    
+    # 下から上へ削除（行番号のずれを防ぐ）
+    rows_to_delete.sort(reverse=True)
+    for row_num in rows_to_delete:
+        self.story_progress_sheet.delete_rows(row_num)
+
+# 初期化時に自動実行
+def _init_story_progress_sheet(self):
+    self._ensure_story_progress_headers()
+    self._cleanup_orphaned_story_progress()  # ← NEW
+```
+
+**効果:**
+- 起動時に自動的に孤立したレコードを削除
+- データの整合性が常に保たれる
+- ストレージの無駄を削減
+
+### 影響範囲
+
+**変更されたファイル:**
+
+1. `src/services/ai_analyzer.py`:
+   - `_validate_and_adjust_stats()`: ステータス検証ロジックを統一（矛盾する処理を削除）
+
+2. `src/services/sheets_manager.py`:
+   - `_generate_stats_for_character()`: Luck値をCharacterオブジェクトに渡すように修正
+   - `save_story_progress()`: 保存前にヘッダー検証を追加（パフォーマンス最適化付き）
+   - `_ensure_story_progress_headers()`: 8カラム以上を検出してマイグレーション実行
+   - `_migrate_story_progress_data_to_simple_format()`: 柔軟なデータ解析と変換処理を改善
+   - `_cleanup_orphaned_story_progress()`: 新規追加 - 孤立したレコードを削除
+   - `_init_story_progress_sheet()`: 初期化時にクリーンアップを実行
+
+### データマイグレーション
+
+**自動実行される処理:**
+
+1. **起動時:**
+   - StoryProgressシートのヘッダーチェック
+   - 8カラム → 7カラムへの自動変換
+   - 余分な列の削除
+   - 孤立したレコードの削除
+
+2. **データ補完:**
+   - 欠損したVictories値をCurrent Levelから計算
+   - 欠損したAttemptsを0に設定
+   - 欠損したLast Playedを現在時刻に設定
+
+### テスト
+
+**検証項目:**
+- ✅ AI生成ステータスの合計が350を超えないこと
+- ✅ Luck値がAI分析に基づいて多様な値になること
+- ✅ StoryProgressシートのVictoriesが数値で表示されること
+- ✅ 8カラムから7カラムへのマイグレーションが正常に動作すること
+- ✅ オートストーリーモード中に登録されたキャラクターの進行状況が保存されること
+- ✅ 削除されたキャラクターのStoryProgress行が自動的に削除されること
+
+### 使用方法
+
+**特別な操作は不要:**
+- アプリケーションを起動するだけで自動的にデータマイグレーションとクリーンアップが実行されます
+- ログで処理内容を確認できます
+
+**ログ例:**
+```
+INFO: StoryProgress sheet has 8 columns. Migrating to simplified 7-column format...
+INFO: Migrating StoryProgress data to simplified format...
+INFO: Migrated row 2: ID=1, Level=4, Victories=3, Attempts=2
+INFO: Successfully migrated 4 rows to simplified format
+INFO: Cleaning up orphaned story progress records...
+INFO: Found 3 existing characters
+INFO: Marking row 5 for deletion: Character ID 7 no longer exists
+INFO: Successfully cleaned up 1 orphaned story progress record(s)
+```
+
+---
+
 ## 2025-10-09 (修正63): バトルリザルト画面の自動閉じタイムアウト延長
 
 ### 変更内容
