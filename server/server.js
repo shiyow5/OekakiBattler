@@ -219,7 +219,7 @@ async function handleEvent(event) {
           session.state = SESSION_STATE.WAITING_FOR_HP;
           await replyMessage(event.replyToken, {
             type: 'text',
-            text: 'HP（10-200）を入力してください：',
+            text: '各ステータスの入力に移ります。\n※ステータス合計は350までにしてください。\n\nまず、HP（10-200）を入力してください：',
           });
           break;
 
