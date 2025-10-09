@@ -1172,14 +1172,74 @@ class SheetsManager:
             # If it failed, use local_path as fallback
             final_sprite_path = sprite_path if sprite_path else str(local_path)
 
+            # Adjust stats if they exceed the maximum total (350, including luck=50)
+            # So the 5 main stats should not exceed 300 in total
+            MAX_TOTAL_STATS = 350
+            DEFAULT_LUCK = 50
+            MAX_MAIN_STATS_TOTAL = MAX_TOTAL_STATS - DEFAULT_LUCK  # 300
+            
+            hp = char_stats.hp
+            attack = char_stats.attack
+            defense = char_stats.defense
+            speed = char_stats.speed
+            magic = char_stats.magic
+            
+            current_total = hp + attack + defense + speed + magic
+            
+            if current_total > MAX_MAIN_STATS_TOTAL:
+                # Calculate scaling factor to fit within the limit
+                scale_factor = MAX_MAIN_STATS_TOTAL / current_total
+                
+                # Scale each stat proportionally and round to integers
+                hp = max(10, round(hp * scale_factor))
+                attack = max(10, round(attack * scale_factor))
+                defense = max(10, round(defense * scale_factor))
+                speed = max(10, round(speed * scale_factor))
+                magic = max(10, round(magic * scale_factor))
+                
+                # Recalculate total after rounding
+                adjusted_total = hp + attack + defense + speed + magic
+                
+                # If still over due to rounding, reduce the highest stat
+                if adjusted_total > MAX_MAIN_STATS_TOTAL:
+                    difference = adjusted_total - MAX_MAIN_STATS_TOTAL
+                    # Find the highest stat and reduce it
+                    stats_list = [
+                        ('hp', hp),
+                        ('attack', attack),
+                        ('defense', defense),
+                        ('speed', speed),
+                        ('magic', magic)
+                    ]
+                    stats_list.sort(key=lambda x: x[1], reverse=True)
+                    
+                    for stat_name, stat_value in stats_list:
+                        if difference <= 0:
+                            break
+                        reduction = min(difference, stat_value - 10)  # Don't go below 10
+                        if stat_name == 'hp':
+                            hp -= reduction
+                        elif stat_name == 'attack':
+                            attack -= reduction
+                        elif stat_name == 'defense':
+                            defense -= reduction
+                        elif stat_name == 'speed':
+                            speed -= reduction
+                        elif stat_name == 'magic':
+                            magic -= reduction
+                        difference -= reduction
+                
+                logger.info(f"Adjusted stats from total {current_total} to {hp + attack + defense + speed + magic} "
+                           f"(scale factor: {scale_factor:.3f}) for character {char_id}")
+
             analyzed_char = Character(
                 id=str(char_id),
                 name=char_stats.name,
-                hp=char_stats.hp,
-                attack=char_stats.attack,
-                defense=char_stats.defense,
-                speed=char_stats.speed,
-                magic=char_stats.magic,
+                hp=hp,
+                attack=attack,
+                defense=defense,
+                speed=speed,
+                magic=magic,
                 description=char_stats.description,
                 image_path=image_url,  # Use original image URL for reference
                 sprite_path=final_sprite_path  # Use local sprite path for battle display
