@@ -1172,14 +1172,79 @@ class SheetsManager:
             # If it failed, use local_path as fallback
             final_sprite_path = sprite_path if sprite_path else str(local_path)
 
+            # Adjust stats if they exceed the maximum total (350, including luck)
+            MAX_TOTAL_STATS = 350
+            
+            hp = char_stats.hp
+            attack = char_stats.attack
+            defense = char_stats.defense
+            speed = char_stats.speed
+            magic = char_stats.magic
+            luck = char_stats.luck if hasattr(char_stats, 'luck') else 50  # Use AI-generated luck or default
+            
+            current_total = hp + attack + defense + speed + magic + luck
+            
+            if current_total > MAX_TOTAL_STATS:
+                # Calculate scaling factor to fit within the limit
+                scale_factor = MAX_TOTAL_STATS / current_total
+                
+                # Scale each stat proportionally and round to integers
+                hp = max(10, round(hp * scale_factor))
+                attack = max(10, round(attack * scale_factor))
+                defense = max(10, round(defense * scale_factor))
+                speed = max(10, round(speed * scale_factor))
+                magic = max(10, round(magic * scale_factor))
+                luck = max(0, round(luck * scale_factor))
+                
+                # Recalculate total after rounding
+                adjusted_total = hp + attack + defense + speed + magic + luck
+                
+                # If still over due to rounding, reduce the highest stat
+                if adjusted_total > MAX_TOTAL_STATS:
+                    difference = adjusted_total - MAX_TOTAL_STATS
+                    # Find the highest stat and reduce it
+                    stats_list = [
+                        ('hp', hp),
+                        ('attack', attack),
+                        ('defense', defense),
+                        ('speed', speed),
+                        ('magic', magic),
+                        ('luck', luck)
+                    ]
+                    stats_list.sort(key=lambda x: x[1], reverse=True)
+                    
+                    for stat_name, stat_value in stats_list:
+                        if difference <= 0:
+                            break
+                        # Determine minimum value based on stat type
+                        min_val = 10 if stat_name != 'luck' else 0
+                        reduction = min(difference, stat_value - min_val)
+                        if stat_name == 'hp':
+                            hp -= reduction
+                        elif stat_name == 'attack':
+                            attack -= reduction
+                        elif stat_name == 'defense':
+                            defense -= reduction
+                        elif stat_name == 'speed':
+                            speed -= reduction
+                        elif stat_name == 'magic':
+                            magic -= reduction
+                        elif stat_name == 'luck':
+                            luck -= reduction
+                        difference -= reduction
+                
+                logger.info(f"Adjusted stats from total {current_total} to {hp + attack + defense + speed + magic + luck} "
+                           f"(scale factor: {scale_factor:.3f}) for character {char_id}")
+
             analyzed_char = Character(
                 id=str(char_id),
                 name=char_stats.name,
-                hp=char_stats.hp,
-                attack=char_stats.attack,
-                defense=char_stats.defense,
-                speed=char_stats.speed,
-                magic=char_stats.magic,
+                hp=hp,
+                attack=attack,
+                defense=defense,
+                speed=speed,
+                magic=magic,
+                luck=luck,  # Include AI-generated luck value
                 description=char_stats.description,
                 image_path=image_url,  # Use original image URL for reference
                 sprite_path=final_sprite_path  # Use local sprite path for battle display
@@ -1940,20 +2005,28 @@ class SheetsManager:
             records = self.story_progress_sheet.get_all_records(expected_headers=expected_headers)
             for record in records:
                 if str(record.get('Character ID')) == str(character_id):
-                    victories = []
-                    victories_str = record.get('Victories', '')
-                    if victories_str:
-                        # Handle both string and integer values, skip non-numeric values
-                        if isinstance(victories_str, str):
-                            # Skip boolean strings like 'TRUE' or 'FALSE'
-                            if victories_str.upper() not in ['TRUE', 'FALSE', '']:
-                                try:
-                                    victories = [int(x.strip()) for x in victories_str.split(',') if x.strip() and x.strip().upper() not in ['TRUE', 'FALSE']]
-                                except ValueError as e:
-                                    logger.warning(f"Could not parse victories string: {victories_str}, error: {e}")
-                                    victories = []
-                        elif isinstance(victories_str, int):
-                            victories = [victories_str] if victories_str > 0 else []
+                    # Parse victories count - reconstruct victories list based on current level and completed status
+                    victories_count = 0
+                    victories_value = record.get('Victories', 0)
+                    try:
+                        if isinstance(victories_value, str) and victories_value.upper() in ['TRUE', 'FALSE', '']:
+                            victories_count = 0
+                        else:
+                            victories_count = int(victories_value)
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not parse victories value: {victories_value}")
+                        victories_count = 0
+                    
+                    # Reconstruct victories list based on current level
+                    # If a player is at level 3, they must have defeated levels 1 and 2
+                    current_level = int(record.get('Current Level', 1))
+                    victories = list(range(1, current_level)) if current_level > 1 else []
+                    
+                    # If victories_count is higher than expected, use it to extend the list
+                    # This handles cases where player defeated higher level bosses
+                    if victories_count > len(victories):
+                        # Assume they defeated up to victories_count levels
+                        victories = list(range(1, victories_count + 1))
 
                     # Parse attempts field safely
                     attempts = 0
@@ -1969,7 +2042,7 @@ class SheetsManager:
 
                     return StoryProgress(
                         character_id=str(character_id),
-                        current_level=int(record.get('Current Level', 1)),
+                        current_level=current_level,
                         completed=record.get('Completed', 'FALSE') == 'TRUE',
                         endless_access=record.get('EndlessAccess', 'FALSE') == 'TRUE',
                         victories=victories,
@@ -1994,10 +2067,18 @@ class SheetsManager:
                 logger.error("Story progress sheet is not available (offline mode or initialization failed)")
                 return False
 
+            # Ensure headers are correct before saving (only once per session)
+            # This is important for characters registered during auto story mode
+            if not hasattr(self, 'story_progress_headers_verified') or not self.story_progress_headers_verified:
+                self._ensure_story_progress_headers()
+                self.story_progress_headers_verified = True
+
             # Use expected_headers to handle duplicate header values
             expected_headers = ['Character ID', 'Current Level', 'Completed', 'EndlessAccess', 'Victories', 'Attempts', 'Last Played']
             records = self.story_progress_sheet.get_all_records(expected_headers=expected_headers)
-            victories_str = ','.join([str(v) for v in progress.victories])
+            
+            # Calculate victories count (simple number, not a list)
+            victories_count = len(progress.victories)
 
             # Check if progress already exists
             for idx, record in enumerate(records):
@@ -2009,12 +2090,12 @@ class SheetsManager:
                         progress.current_level,
                         'TRUE' if progress.completed else 'FALSE',
                         'TRUE' if progress.endless_access else 'FALSE',
-                        victories_str,
+                        victories_count,  # Victories: count of defeated bosses (simple number)
                         progress.attempts,
                         datetime.now().isoformat()
                     ]]
                     self.story_progress_sheet.update(f'A{row_num}:G{row_num}', values)
-                    logger.info(f"Updated story progress for character {progress.character_id}")
+                    logger.info(f"Updated story progress for character {progress.character_id} (Victories: {victories_count}, Current Level: {progress.current_level})")
                     return True
 
             # Add new progress
@@ -2023,12 +2104,12 @@ class SheetsManager:
                 progress.current_level,
                 'TRUE' if progress.completed else 'FALSE',
                 'TRUE' if progress.endless_access else 'FALSE',
-                victories_str,
+                victories_count,  # Victories: count of defeated bosses (simple number)
                 progress.attempts,
                 datetime.now().isoformat()
             ]]
             self.story_progress_sheet.append_row(values[0])
-            logger.info(f"Added new story progress for character {progress.character_id}")
+            logger.info(f"Added new story progress for character {progress.character_id} (Victories: {victories_count}, Current Level: {progress.current_level})")
             return True
 
         except Exception as e:
@@ -2088,6 +2169,7 @@ class SheetsManager:
         try:
             if not self.online_mode or not hasattr(self, 'sheet') or self.sheet is None:
                 self.story_progress_sheet = None
+                self.story_progress_headers_verified = False
                 return
 
             try:
@@ -2096,12 +2178,17 @@ class SheetsManager:
 
                 # Verify and fix headers if needed
                 self._ensure_story_progress_headers()
+                self.story_progress_headers_verified = True
+                
+                # Clean up orphaned character records
+                self._cleanup_orphaned_story_progress()
 
             except:
                 # Create the sheet if it doesn't exist
                 self.story_progress_sheet = self.sheet.add_worksheet(title="StoryProgress", rows=1000, cols=7)
                 headers = ['Character ID', 'Current Level', 'Completed', 'EndlessAccess', 'Victories', 'Attempts', 'Last Played']
                 self.story_progress_sheet.update('A1:G1', [headers])
+                self.story_progress_headers_verified = True
                 logger.info("Created StoryProgress sheet")
 
         except Exception as e:
@@ -2117,15 +2204,203 @@ class SheetsManager:
             expected_headers = ['Character ID', 'Current Level', 'Completed', 'EndlessAccess', 'Victories', 'Attempts', 'Last Played']
             current_headers = self.story_progress_sheet.row_values(1)
 
-            # Check if headers are correct
-            if current_headers != expected_headers:
-                logger.warning(f"StoryProgress headers incorrect. Current: {current_headers}")
-                logger.info(f"Fixing StoryProgress headers to: {expected_headers}")
+            # Check if headers need updating
+            needs_update = False
+            needs_migration = False
+            
+            if len(current_headers) >= 8:
+                # Old format with 8 columns (had 'Defeated Bosses' or duplicate headers), needs migration to 7 columns
+                logger.warning(f"StoryProgress sheet has {len(current_headers)} columns. Migrating to simplified 7-column format...")
+                needs_update = True
+                needs_migration = True
+            elif len(current_headers) != 7:
+                # Wrong number of columns
+                logger.warning(f"StoryProgress sheet has unexpected format ({len(current_headers)} columns). Fixing...")
+                needs_update = True
+                needs_migration = True
+            elif current_headers != expected_headers:
+                # Headers exist but are incorrect
+                logger.warning(f"StoryProgress headers incorrect. Current: {current_headers}, Expected: {expected_headers}")
+                needs_update = True
+                needs_migration = True
+            
+            if needs_update:
+                # Always migrate data first if headers are wrong, to ensure data consistency
+                if needs_migration:
+                    logger.info("Migrating data before updating headers...")
+                    self._migrate_story_progress_data_to_simple_format()
+                
+                logger.info(f"Updating StoryProgress headers to: {expected_headers}")
                 self.story_progress_sheet.update('A1:G1', [expected_headers])
-                logger.info("StoryProgress headers fixed")
+                
+                # Clear any extra columns (column H onwards) if they exist
+                if len(current_headers) > 7:
+                    logger.info(f"Clearing extra columns (H onwards) from header row...")
+                    # Clear from H1 to last column
+                    clear_range = f'H1:{chr(65 + len(current_headers) - 1)}1'
+                    self.story_progress_sheet.batch_clear([clear_range])
+                
+                logger.info("StoryProgress headers updated successfully")
 
         except Exception as e:
             logger.error(f"Error ensuring story progress headers: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _migrate_story_progress_data_to_simple_format(self):
+        """Migrate StoryProgress data from 8-column format to simplified 7-column format"""
+        try:
+            logger.info("Migrating StoryProgress data to simplified format...")
+            
+            # Get all records (excluding header)
+            all_values = self.story_progress_sheet.get_all_values()
+            
+            if len(all_values) <= 1:
+                # No data to migrate
+                logger.info("No data to migrate")
+                return
+            
+            # Check current header to determine format
+            current_headers = all_values[0] if len(all_values) > 0 else []
+            logger.info(f"Current headers: {current_headers}")
+            
+            # Process each row (skip header at index 0)
+            for row_idx in range(1, len(all_values)):
+                row = all_values[row_idx]
+                
+                if len(row) < 2:  # Need at least Character ID and Level
+                    continue  # Skip incomplete rows
+                
+                # Parse based on current format
+                character_id = row[0] if len(row) > 0 else ''
+                
+                if not character_id or character_id.strip() == '':
+                    continue  # Skip empty rows
+                
+                current_level = row[1] if len(row) > 1 else '1'
+                completed = row[2] if len(row) > 2 else 'FALSE'
+                endless_access = row[3] if len(row) > 3 else 'FALSE'
+                
+                # Calculate proper victories count based on current level
+                # If at level 3, must have defeated levels 1 and 2, so victories = 2
+                try:
+                    level = int(current_level) if current_level else 1
+                    victories_count = max(0, level - 1)  # Level 1 = 0 victories, Level 2 = 1 victory, etc.
+                except:
+                    victories_count = 0
+                
+                # Determine format and extract attempts and last_played
+                attempts = '0'
+                last_played = datetime.now().isoformat()
+                
+                if len(row) >= 8:
+                    # 8-column format: [ID, Level, Completed, EndlessAccess, Victories(count), Defeated Bosses, Attempts, Last Played]
+                    attempts = row[6] if len(row) > 6 and row[6] else '0'
+                    last_played = row[7] if len(row) > 7 and row[7] else datetime.now().isoformat()
+                elif len(row) >= 7:
+                    # 7-column format: [ID, Level, Completed, EndlessAccess, Victories(count), Attempts, Last Played]
+                    attempts = row[5] if len(row) > 5 and row[5] else '0'
+                    last_played = row[6] if len(row) > 6 and row[6] else datetime.now().isoformat()
+                elif len(row) >= 6:
+                    # Partial data
+                    attempts = row[5] if len(row) > 5 and row[5] else '0'
+                    last_played = datetime.now().isoformat()
+                
+                # Ensure attempts is a valid number
+                try:
+                    int(attempts)
+                except:
+                    attempts = '0'
+                
+                # Ensure last_played is valid ISO format
+                if not last_played or last_played == '':
+                    last_played = datetime.now().isoformat()
+                
+                # Update row with new simplified format
+                new_row = [
+                    character_id,
+                    current_level,
+                    completed,
+                    endless_access,
+                    victories_count,  # Calculated from current_level
+                    attempts,
+                    last_played
+                ]
+                
+                # Update the row
+                row_num = row_idx + 1  # +1 because sheets are 1-indexed
+                self.story_progress_sheet.update(f'A{row_num}:G{row_num}', [new_row])
+                logger.info(f"Migrated row {row_num}: ID={character_id}, Level={current_level}, Victories={victories_count}, Attempts={attempts}")
+            
+            logger.info(f"Successfully migrated {len(all_values) - 1} rows to simplified format")
+            
+        except Exception as e:
+            logger.error(f"Error migrating story progress data: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _cleanup_orphaned_story_progress(self):
+        """Remove story progress records for characters that no longer exist"""
+        try:
+            if not self.story_progress_sheet:
+                return
+            
+            logger.info("Cleaning up orphaned story progress records...")
+            
+            # Get all existing character IDs
+            all_characters = self.get_all_characters()
+            existing_char_ids = {str(char.id) for char in all_characters}
+            logger.info(f"Found {len(existing_char_ids)} existing characters")
+            
+            # Get all story progress records
+            all_values = self.story_progress_sheet.get_all_values()
+            
+            if len(all_values) <= 1:
+                logger.info("No story progress data to clean up")
+                return
+            
+            # Track rows to delete (from bottom to top to avoid index shifting)
+            rows_to_delete = []
+            
+            # Check each row (skip header at index 0)
+            for row_idx in range(1, len(all_values)):
+                row = all_values[row_idx]
+                
+                if len(row) < 1:
+                    continue
+                
+                character_id = str(row[0]).strip() if row[0] else ''
+                
+                # Skip empty rows
+                if not character_id:
+                    rows_to_delete.append(row_idx + 1)  # +1 for 1-based indexing
+                    continue
+                
+                # Check if character exists
+                if character_id not in existing_char_ids:
+                    rows_to_delete.append(row_idx + 1)  # +1 for 1-based indexing
+                    logger.info(f"Marking row {row_idx + 1} for deletion: Character ID {character_id} no longer exists")
+            
+            # Delete rows from bottom to top to avoid index shifting
+            if rows_to_delete:
+                rows_to_delete.sort(reverse=True)
+                logger.info(f"Deleting {len(rows_to_delete)} orphaned story progress record(s)...")
+                
+                for row_num in rows_to_delete:
+                    try:
+                        self.story_progress_sheet.delete_rows(row_num)
+                        logger.debug(f"Deleted row {row_num}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete row {row_num}: {e}")
+                
+                logger.info(f"Successfully cleaned up {len(rows_to_delete)} orphaned story progress record(s)")
+            else:
+                logger.info("No orphaned story progress records found")
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up orphaned story progress: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def _fix_id_integrity(self):
         """Fix character ID integrity issues (duplicates, gaps, wrong order)

@@ -261,34 +261,60 @@ class AIAnalyzer:
                     else:
                         stats_data[stat] = (min_val + max_val) // 2
 
-            # Check total stats and adjust if needed
-            total_stats = stats_data['hp'] + stats_data['attack'] + stats_data['defense'] + stats_data['speed'] + stats_data['magic'] + stats_data['luck']
-            if total_stats > 350:
-                logger.warning(f"Total stats ({total_stats}) exceeds 350, adjusting proportionally")
-                scale_factor = 350 / total_stats
-                for stat in ['hp', 'attack', 'defense', 'speed', 'magic', 'luck']:
-                    stats_data[stat] = max(ranges[stat][0], int(stats_data[stat] * scale_factor))
-
             # Ensure description exists and is reasonable
             if 'description' not in stats_data or not stats_data['description']:
                 stats_data['description'] = "個性的なキャラクター"
             elif len(stats_data['description']) > 50:
                 stats_data['description'] = stats_data['description'][:47] + "..."
             
-            # Balance check - prevent extreme total stats
-            total_stats = sum(stats_data[stat] for stat in ['hp', 'attack', 'defense', 'speed', 'magic'])
-            if total_stats > 500:  # Too high, scale down
-                scale_factor = 500 / total_stats
-                for stat in ['hp', 'attack', 'defense', 'speed', 'magic']:
+            # Check total stats and adjust if needed (MUST be 350 or less)
+            total_stats = stats_data['hp'] + stats_data['attack'] + stats_data['defense'] + stats_data['speed'] + stats_data['magic'] + stats_data['luck']
+            MAX_TOTAL_STATS = 350
+            
+            if total_stats > MAX_TOTAL_STATS:
+                logger.warning(f"Total stats ({total_stats}) exceeds {MAX_TOTAL_STATS}, adjusting proportionally")
+                scale_factor = MAX_TOTAL_STATS / total_stats
+                
+                # Scale all stats proportionally
+                for stat in ['hp', 'attack', 'defense', 'speed', 'magic', 'luck']:
+                    stats_data[stat] = max(ranges[stat][0], round(stats_data[stat] * scale_factor))
+                
+                # Recalculate after rounding
+                new_total = sum(stats_data[stat] for stat in ['hp', 'attack', 'defense', 'speed', 'magic', 'luck'])
+                
+                # If still over due to rounding, reduce the highest stat(s)
+                if new_total > MAX_TOTAL_STATS:
+                    difference = new_total - MAX_TOTAL_STATS
+                    # Sort stats by value (highest first)
+                    stat_list = [(stat, stats_data[stat]) for stat in ['hp', 'attack', 'defense', 'speed', 'magic', 'luck']]
+                    stat_list.sort(key=lambda x: x[1], reverse=True)
+                    
+                    for stat_name, stat_value in stat_list:
+                        if difference <= 0:
+                            break
+                        min_val = ranges[stat_name][0]
+                        reduction = min(difference, stat_value - min_val)
+                        stats_data[stat_name] -= reduction
+                        difference -= reduction
+                
+                final_total = sum(stats_data[stat] for stat in ['hp', 'attack', 'defense', 'speed', 'magic', 'luck'])
+                logger.info(f"Adjusted stats: {total_stats} -> {final_total} (scale factor: {scale_factor:.3f})")
+            elif total_stats < 200:
+                # Too low - scale up to minimum viable stats
+                logger.warning(f"Total stats ({total_stats}) too low, scaling up to minimum")
+                scale_factor = 250 / total_stats  # Aim for 250 as reasonable minimum
+                for stat in ['hp', 'attack', 'defense', 'speed', 'magic', 'luck']:
                     min_val, max_val = ranges[stat]
-                    scaled_value = int(stats_data[stat] * scale_factor)
+                    scaled_value = round(stats_data[stat] * scale_factor)
                     stats_data[stat] = max(min_val, min(max_val, scaled_value))
-            elif total_stats < 200:  # Too low, scale up
-                scale_factor = 200 / total_stats
-                for stat in ['hp', 'attack', 'defense', 'speed', 'magic']:
-                    min_val, max_val = ranges[stat]
-                    scaled_value = int(stats_data[stat] * scale_factor)
-                    stats_data[stat] = max(min_val, min(max_val, scaled_value))
+                
+                # Ensure we didn't exceed max after scaling up
+                new_total = sum(stats_data[stat] for stat in ['hp', 'attack', 'defense', 'speed', 'magic', 'luck'])
+                if new_total > MAX_TOTAL_STATS:
+                    # Recursively adjust if we went over
+                    final_scale = MAX_TOTAL_STATS / new_total
+                    for stat in ['hp', 'attack', 'defense', 'speed', 'magic', 'luck']:
+                        stats_data[stat] = max(ranges[stat][0], round(stats_data[stat] * final_scale))
             
             return stats_data
             
