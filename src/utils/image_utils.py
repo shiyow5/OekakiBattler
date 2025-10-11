@@ -5,7 +5,11 @@ Image utility functions
 import cv2
 import numpy as np
 from PIL import Image
-from typing import Tuple
+from typing import Tuple, Optional
+from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 def auto_rotate_image(image: np.ndarray) -> np.ndarray:
     """Automatically rotate image based on content orientation"""
@@ -133,6 +137,69 @@ def enhance_drawing_features(image: np.ndarray) -> np.ndarray:
             return enhanced
         else:
             return cleaned
-            
+
     except:
         return image
+
+def download_image(url: str, cache_dir: str) -> Optional[str]:
+    """
+    Download an image from URL and cache it locally
+
+    Args:
+        url: URL of the image (Google Drive or any HTTP URL)
+        cache_dir: Directory to cache the downloaded image
+
+    Returns:
+        Local path to the cached image, or None if download failed
+    """
+    try:
+        import requests
+        import hashlib
+
+        # Create cache directory if it doesn't exist
+        cache_path = Path(cache_dir)
+        cache_path.mkdir(parents=True, exist_ok=True)
+
+        # Generate cache filename from URL hash
+        url_hash = hashlib.md5(url.encode()).hexdigest()
+        # Extract extension from URL if possible
+        extension = '.png'
+        if url.lower().endswith(('.jpg', '.jpeg')):
+            extension = '.jpg'
+        elif url.lower().endswith('.png'):
+            extension = '.png'
+
+        cache_file = cache_path / f"{url_hash}{extension}"
+
+        # Return cached file if it exists
+        if cache_file.exists():
+            logger.debug(f"Using cached image: {cache_file}")
+            return str(cache_file)
+
+        # Convert Google Drive view URLs to direct download URLs
+        download_url = url
+        if 'drive.google.com' in url:
+            if '/file/d/' in url:
+                # Extract file ID from share URL
+                file_id = url.split('/file/d/')[1].split('/')[0]
+                download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            elif 'id=' in url:
+                # Already in direct download format
+                pass
+
+        # Download file
+        logger.info(f"Downloading image from {url}")
+        response = requests.get(download_url, stream=True, timeout=10)
+        response.raise_for_status()
+
+        # Save to cache
+        with open(cache_file, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        logger.info(f"✓ Image cached: {cache_file}")
+        return str(cache_file)
+
+    except Exception as e:
+        logger.error(f"Failed to download image from {url}: {e}")
+        return None

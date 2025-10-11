@@ -2759,10 +2759,11 @@ class EndlessBattleWindow:
         self.visual_mode = visual_mode
         self.is_running = True
         self.check_interval = 10000  # Check for new characters every 10 seconds
+        self.champion_sprite_img = None  # Cache for champion sprite PhotoImage
 
         self.window = tk.Toplevel(parent)
         self.window.title("♾️ エンドレスバトル")
-        self.window.geometry("600x500")
+        self.window.geometry("800x700")
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Center the window
@@ -2781,14 +2782,36 @@ class EndlessBattleWindow:
         title_label.pack(pady=(0, 20))
 
         # Champion info frame
-        self.champion_frame = ttk.LabelFrame(main_frame, text="🏆 現在のチャンピオン", padding=10)
+        self.champion_frame = ttk.LabelFrame(main_frame, text="", padding=15)
         self.champion_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Champion title (larger font)
+        self.champion_title_var = tk.StringVar(value="🏆 現在のチャンピオン")
+        self.champion_title_label = tk.Label(
+            self.champion_frame,
+            textvariable=self.champion_title_var,
+            font=("Arial", 32, "bold"),
+            fg="#FFD700",
+            bg="#2C3E50"
+        )
+        self.champion_title_label.pack(pady=(0, 15))
+
+        # Champion sprite canvas (white background) - larger size
+        self.champion_canvas = tk.Canvas(
+            self.champion_frame,
+            width=300,
+            height=300,
+            bg="white",
+            highlightthickness=3,
+            highlightbackground="#FFD700"
+        )
+        self.champion_canvas.pack(pady=(0, 15))
 
         self.champion_name_var = tk.StringVar()
         self.champion_wins_var = tk.StringVar()
 
-        ttk.Label(self.champion_frame, textvariable=self.champion_name_var, font=("Arial", 14, "bold")).pack()
-        ttk.Label(self.champion_frame, textvariable=self.champion_wins_var, font=("Arial", 11)).pack()
+        ttk.Label(self.champion_frame, textvariable=self.champion_name_var, font=("Arial", 20, "bold")).pack(pady=(0, 5))
+        ttk.Label(self.champion_frame, textvariable=self.champion_wins_var, font=("Arial", 14)).pack()
 
         # Status frame
         status_frame = ttk.LabelFrame(main_frame, text="📊 ステータス", padding=10)
@@ -2802,15 +2825,15 @@ class EndlessBattleWindow:
         ttk.Label(status_frame, textvariable=self.remaining_var).pack(anchor=tk.W)
         ttk.Label(status_frame, textvariable=self.status_var, font=("Arial", 10, "italic")).pack(anchor=tk.W, pady=(10, 0))
 
-        # Battle log
-        log_frame = ttk.LabelFrame(main_frame, text="📝 バトルログ", padding=10)
+        # Battle log (smaller)
+        log_frame = ttk.LabelFrame(main_frame, text="📝 バトルログ", padding=5)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
         # Scrollbar
         scrollbar = ttk.Scrollbar(log_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self.log_text = tk.Text(log_frame, height=10, wrap=tk.WORD, yscrollcommand=scrollbar.set)
+        self.log_text = tk.Text(log_frame, height=4, wrap=tk.WORD, yscrollcommand=scrollbar.set, font=("Arial", 9))
         self.log_text.pack(fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.log_text.yview)
 
@@ -2890,11 +2913,70 @@ class EndlessBattleWindow:
             self._log(f"エラー: {e}")
             self.window.after(self.check_interval, self._start_battle_loop)
 
+    def _load_champion_sprite(self, champion: Character):
+        """Load and display champion sprite image"""
+        try:
+            from PIL import Image, ImageTk
+            import os
+
+            sprite_path = champion.sprite_path
+
+            # Check if sprite path is valid
+            if not sprite_path:
+                logger.warning("Champion sprite path is empty")
+                self.champion_canvas.delete("all")
+                self.champion_canvas.create_text(100, 100, text="画像なし", font=("Arial", 12))
+                return
+
+            # Check if sprite path is a URL (online mode) or local path
+            if sprite_path.startswith('http'):
+                # Online mode - download and cache image
+                from src.utils.image_utils import download_image
+                local_sprite_path = download_image(sprite_path, os.path.join('data', 'cache'))
+                if not local_sprite_path:
+                    logger.error(f"Failed to download champion sprite: {sprite_path}")
+                    self.champion_canvas.delete("all")
+                    self.champion_canvas.create_text(100, 100, text="画像取得失敗", font=("Arial", 11))
+                    return
+                sprite_path = local_sprite_path
+
+            # Load and resize image
+            if os.path.exists(sprite_path):
+                img = Image.open(sprite_path)
+                # Resize to fit larger canvas while maintaining aspect ratio
+                img.thumbnail((280, 280), Image.Resampling.LANCZOS)
+
+                # Convert to PhotoImage and cache
+                self.champion_sprite_img = ImageTk.PhotoImage(img)
+
+                # Clear canvas and display image centered
+                self.champion_canvas.delete("all")
+                canvas_width = 300
+                canvas_height = 300
+                img_width, img_height = img.size
+                x = (canvas_width - img_width) // 2
+                y = (canvas_height - img_height) // 2
+                self.champion_canvas.create_image(x, y, anchor=tk.NW, image=self.champion_sprite_img)
+            else:
+                logger.warning(f"Champion sprite not found: {sprite_path}")
+                self.champion_canvas.delete("all")
+                self.champion_canvas.create_text(150, 150, text="画像なし", font=("Arial", 14))
+
+        except Exception as e:
+            logger.error(f"Error loading champion sprite: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self.champion_canvas.delete("all")
+            self.champion_canvas.create_text(150, 150, text="画像読込エラー", font=("Arial", 12))
+
     def _update_waiting_state(self, result):
         """Update UI for waiting state"""
         champion = result['champion']
         self.champion_name_var.set(champion.name)
         self.champion_wins_var.set(f"連勝数: {result['champion_wins']}")
+
+        # Update champion sprite
+        self._load_champion_sprite(champion)
 
         status = self.endless_engine.get_status()
         self.battle_count_var.set(f"総バトル数: {status['total_battles']}")
@@ -2914,10 +2996,13 @@ class EndlessBattleWindow:
         self.champion_name_var.set(champion.name)
         self.champion_wins_var.set(f"連勝数: {result['champion_wins']}")
 
+        # Update champion sprite
+        self._load_champion_sprite(champion)
+
         self.battle_count_var.set(f"総バトル数: {result['battle_count']}")
         self.remaining_var.set(f"待機中の挑戦者: {result['remaining_count']}")
 
-        # Log battle result
+        # Update champion title based on result
         if result['winner']:
             winner_name = result['winner'].name
             loser_name = result['loser'].name
@@ -2925,12 +3010,21 @@ class EndlessBattleWindow:
             if result['winner'] == champion:
                 msg = f"🏆 {winner_name} が {loser_name} を倒しました！チャンピオン防衛成功！"
                 self.status_var.set("チャンピオンが勝利！")
+                self.champion_title_var.set("🏆 チャンピオン防衛成功！")
+                # Gold color on dark blue background for defense
+                self.champion_title_label.config(fg="#FFD700", bg="#2C3E50")
             else:
                 msg = f"👑 新チャンピオン誕生！{winner_name} が {loser_name} を倒しました！"
                 self.status_var.set("新チャンピオン誕生！")
+                self.champion_title_var.set("👑 新チャンピオン誕生！")
+                # Bright gold/yellow on royal purple background for new champion
+                self.champion_title_label.config(fg="#FFF200", bg="#6A0DAD")
         else:
             msg = "引き分け"
             self.status_var.set("引き分け")
+            self.champion_title_var.set("🏆 現在のチャンピオン")
+            # Reset to default gold on dark blue
+            self.champion_title_label.config(fg="#FFD700", bg="#2C3E50")
 
         self._log(msg)
 

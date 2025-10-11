@@ -184,7 +184,7 @@ function handleRegisterCharacterManual(payload, spreadsheetId) {
       characterData.defense,
       characterData.speed,
       characterData.magic,
-      characterData.luck || 50, // Luck（デフォルト50）
+      characterData.luck !== undefined ? characterData.luck : 50, // Luck（デフォルト50）
       characterData.description,
       now,
       0, // Wins
@@ -203,7 +203,7 @@ function handleRegisterCharacterManual(payload, spreadsheetId) {
         defense: characterData.defense,
         speed: characterData.speed,
         magic: characterData.magic,
-        luck: characterData.luck || 50,
+        luck: characterData.luck !== undefined ? characterData.luck : 50,
         description: characterData.description
       }
     })).setMimeType(ContentService.MimeType.JSON);
