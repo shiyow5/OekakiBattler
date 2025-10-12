@@ -2758,7 +2758,7 @@ class EndlessBattleWindow:
         self.db_manager = db_manager
         self.visual_mode = visual_mode
         self.is_running = True
-        self.check_interval = 10000  # Check for new characters every 10 seconds
+        self.check_interval = 30000  # Check for new characters every 30 seconds
         self.champion_sprite_img = None  # Cache for champion sprite PhotoImage
 
         self.window = tk.Toplevel(parent)
@@ -3148,7 +3148,7 @@ class AutoStoryModeWindow:
                 self.status_label.config(text="状態: 新しいキャラクターを待機中...")
                 self._log(result.get('message', '新しいキャラクターを待機中...'))
                 # Wait and check again
-                self.window.after(10000, self._run_next_battle)
+                self.window.after(20000, self._run_next_battle)
                 return
 
             elif status == 'completed':
