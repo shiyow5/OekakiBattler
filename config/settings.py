@@ -24,6 +24,9 @@ class Settings:
     GAS_WEBHOOK_URL = os.getenv("GAS_WEBHOOK_URL")  # Google Apps Script Web App URL
     GAS_SHARED_SECRET = os.getenv("SHARED_SECRET", "oekaki_battler_line_to_gas_secret_shiyow5")  # Secret for GAS authentication
 
+    # API Cache Settings (to reduce Google Sheets API calls and avoid quota limits)
+    SHEETS_CACHE_TTL = int(os.getenv("SHEETS_CACHE_TTL", "60"))  # Cache time-to-live in seconds (default: 60 seconds)
+
     # Image Processing
     MAX_IMAGE_SIZE = 600  # Maximum width or height while preserving aspect ratio
     SUPPORTED_FORMATS = [".png", ".jpg", ".jpeg", ".bmp"]

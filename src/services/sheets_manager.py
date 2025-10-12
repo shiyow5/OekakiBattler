@@ -37,6 +37,14 @@ class SheetsManager:
         self.drive_service = None
         self.credentials = None
         self.online_mode = False  # Track if connected to Google Sheets/Drive
+
+        # Cache system to reduce API calls
+        self._character_cache = {}  # Cache individual characters by ID
+        self._all_characters_cache = None  # Cache all characters list
+        self._story_progress_cache = {}  # Cache story progress by character ID
+        self._cache_timestamp = 0  # Timestamp of last cache update
+        self.cache_ttl = Settings.SHEETS_CACHE_TTL  # Cache time-to-live in seconds (from settings)
+
         self._initialize_client()
 
     def _initialize_client(self):
@@ -167,6 +175,25 @@ class SheetsManager:
 
         except Exception as e:
             logger.error(f"Error ensuring ranking headers: {e}")
+
+    def _is_cache_valid(self) -> bool:
+        """Check if the cache is still valid based on TTL"""
+        import time
+        return (time.time() - self._cache_timestamp) < self.cache_ttl
+
+    def _invalidate_cache(self):
+        """Invalidate all caches"""
+        self._character_cache.clear()
+        self._all_characters_cache = None
+        self._story_progress_cache.clear()
+        self._cache_timestamp = 0
+        logger.debug("All caches invalidated")
+
+    def _update_cache_timestamp(self):
+        """Update the cache timestamp to current time"""
+        import time
+        self._cache_timestamp = time.time()
+        logger.debug(f"Cache timestamp updated: {self._cache_timestamp}")
 
     def upload_to_drive_via_gas(self, file_path: str, file_name: str = None) -> Optional[str]:
         """
@@ -520,6 +547,9 @@ class SheetsManager:
             self.worksheet.append_row(row)
             character.id = str(next_id)  # Convert to string to match Character model
 
+            # Invalidate cache after creating character
+            self._invalidate_cache()
+
             logger.info(f"Character created: {character.name} (ID: {next_id})")
             return True
 
@@ -545,11 +575,22 @@ class SheetsManager:
                 logger.warning(f"Invalid character ID format: {character_id}")
                 return None
 
+            # Check cache first
+            if char_id in self._character_cache and self._is_cache_valid():
+                logger.debug(f"Using cached character: ID {char_id}")
+                return self._character_cache[char_id]
+
+            # Cache miss or expired - fetch from API
+            logger.debug(f"Cache miss for character ID {char_id}, fetching from API")
             all_records = self.worksheet.get_all_records()
 
             for record in all_records:
                 if record.get('ID') == char_id:
-                    return self._record_to_character(record)
+                    char = self._record_to_character(record)
+                    # Update cache
+                    if char:
+                        self._character_cache[char_id] = char
+                    return char
 
             logger.warning(f"Character not found: ID {char_id}")
             return None
@@ -558,16 +599,25 @@ class SheetsManager:
             logger.error(f"Error getting character: {e}")
             return None
 
-    def get_all_characters(self, progress_callback=None) -> List[Character]:
+    def get_all_characters(self, progress_callback=None, force_refresh: bool = False) -> List[Character]:
         """Get all characters and generate stats for empty ones
 
         Args:
             progress_callback: Optional callback function(current, total, char_name, step)
                                to report progress during AI generation and sprite processing
+            force_refresh: Force refresh from API, bypassing cache
         """
         try:
-            # Fix ID integrity before processing (throttled to avoid API quota)
             import time
+
+            # Return cached data if valid and no force refresh
+            if not force_refresh and self._is_cache_valid() and self._all_characters_cache is not None:
+                logger.info(f"Using cached character data ({len(self._all_characters_cache)} characters)")
+                return self._all_characters_cache.copy()
+
+            logger.info("Fetching fresh character data from Google Sheets...")
+
+            # Fix ID integrity before processing (throttled to avoid API quota)
             current_time = time.time()
             if current_time - self.last_id_integrity_check > self.id_integrity_check_interval:
                 logger.info("Running ID integrity check (throttled)...")
@@ -576,9 +626,7 @@ class SheetsManager:
             else:
                 logger.debug(f"Skipping ID integrity check (last check: {int(current_time - self.last_id_integrity_check)}s ago)")
 
-            # Force fresh data from spreadsheet (avoid cache issues during endless mode)
-            # Note: gspread caches worksheet data, so we need to refresh it
-            logger.debug("Fetching fresh data from spreadsheet...")
+            # Fetch fresh data from spreadsheet
             all_records = self.worksheet.get_all_records()
             logger.debug(f"Retrieved {len(all_records)} records from spreadsheet")
 
@@ -674,7 +722,15 @@ class SheetsManager:
                     if char:
                         characters.append(char)
 
-            logger.info(f"Retrieved {len(characters)} characters")
+            # Update cache
+            self._all_characters_cache = characters.copy()
+            self._update_cache_timestamp()
+
+            # Also cache individual characters for get_character() method
+            for char in characters:
+                self._character_cache[char.id] = char
+
+            logger.info(f"Retrieved {len(characters)} characters (cache updated)")
             return characters
 
         except Exception as e:
@@ -735,6 +791,10 @@ class SheetsManager:
 
                     # Update the row
                     self.worksheet.update(f'A{row_num}:O{row_num}', [row])
+
+                    # Invalidate cache after updating character
+                    self._invalidate_cache()
+
                     logger.info(f"✓ Character updated: {character.name} (ID: {character.id}) - Image URLs preserved")
                     return True
 
@@ -910,6 +970,9 @@ class SheetsManager:
                         logger.info(f"Total: Deleted {local_images_deleted} cached image(s) from local storage")
                     else:
                         logger.debug(f"No cached images found for character {char_id}")
+
+                    # Invalidate cache after deleting character
+                    self._invalidate_cache()
 
                     return True
 
@@ -1993,6 +2056,11 @@ class SheetsManager:
             from src.models.story_boss import StoryProgress
             from datetime import datetime
 
+            # Check cache first
+            if character_id in self._story_progress_cache and self._is_cache_valid():
+                logger.debug(f"Using cached story progress for character: {character_id}")
+                return self._story_progress_cache[character_id]
+
             if not hasattr(self, 'story_progress_sheet') or self.story_progress_sheet is None:
                 self._init_story_progress_sheet()
 
@@ -2002,6 +2070,7 @@ class SheetsManager:
 
             # Use expected_headers to handle duplicate header values
             expected_headers = ['Character ID', 'Current Level', 'Completed', 'EndlessAccess', 'Victories', 'Attempts', 'Last Played']
+            logger.debug(f"Fetching story progress from API for character: {character_id}")
             records = self.story_progress_sheet.get_all_records(expected_headers=expected_headers)
             for record in records:
                 if str(record.get('Character ID')) == str(character_id):
@@ -2040,7 +2109,7 @@ class SheetsManager:
                         logger.warning(f"Could not parse attempts value: {attempts_value}")
                         attempts = 0
 
-                    return StoryProgress(
+                    progress = StoryProgress(
                         character_id=str(character_id),
                         current_level=current_level,
                         completed=record.get('Completed', 'FALSE') == 'TRUE',
@@ -2049,6 +2118,9 @@ class SheetsManager:
                         attempts=attempts,
                         last_played=datetime.fromisoformat(record.get('Last Played', datetime.now().isoformat()))
                     )
+                    # Cache the progress
+                    self._story_progress_cache[character_id] = progress
+                    return progress
             return None
 
         except Exception as e:
@@ -2095,6 +2167,10 @@ class SheetsManager:
                         datetime.now().isoformat()
                     ]]
                     self.story_progress_sheet.update(f'A{row_num}:G{row_num}', values)
+
+                    # Update cache
+                    self._story_progress_cache[progress.character_id] = progress
+
                     logger.info(f"Updated story progress for character {progress.character_id} (Victories: {victories_count}, Current Level: {progress.current_level})")
                     return True
 
@@ -2109,6 +2185,10 @@ class SheetsManager:
                 datetime.now().isoformat()
             ]]
             self.story_progress_sheet.append_row(values[0])
+
+            # Update cache
+            self._story_progress_cache[progress.character_id] = progress
+
             logger.info(f"Added new story progress for character {progress.character_id} (Victories: {victories_count}, Current Level: {progress.current_level})")
             return True
 

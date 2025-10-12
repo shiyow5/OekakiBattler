@@ -1,5 +1,197 @@
 # 変更履歴 (CHANGES.md)
 
+## 2025-10-12 (修正65): スプレッドシートのキャラクター画像カラム構造の変更とPDF文書化
+
+### 変更内容
+Google SheetsのCharactersシートにおいて、`Image URL`と`Sprite URL`の2カラム構成から、`Original Image URL`, `Transparent Sprite URL`, `Masked Sprite URL`の3カラム構成に変更しました。また、この変更内容を英語のPDF文書として記録しました。
+
+### 主な変更
+
+#### 1. Charactersシートのカラム構造変更
+
+**変更理由:**
+- 以前の構造では、元画像とスプライト画像の2種類のみを保存
+- 透過処理済みスプライトとマスク適用済みスプライトの区別がなかった
+- 画像処理の各段階を明確に管理する必要性
+
+**修正内容:**
+```python
+# src/services/sheets_manager.py - _ensure_worksheets_exist()
+
+# Before: 15カラム構成
+headers = [
+    'ID', 'Name', 'Image URL', 'Sprite URL', 'HP', 'Attack',
+    'Defense', 'Speed', 'Magic', 'Luck', 'Description',
+    'Created At', 'Wins', 'Losses', 'Draws'
+]
+
+# After: 17カラム構成
+headers = [
+    'ID', 'Name', 'Original Image URL', 'Transparent Sprite URL',
+    'Masked Sprite URL', 'HP', 'Attack', 'Defense', 'Speed',
+    'Magic', 'Luck', 'Description', 'Created At', 'Wins',
+    'Losses', 'Draws'
+]
+```
+
+**影響を受けるメソッド:**
+- `_ensure_worksheets_exist()`: ヘッダー行の定義を更新
+- `add_character()`: 画像URLの書き込み位置を調整（カラムC, D, E）
+- `_download_and_cache_image()`: 3種類の画像URLに対応
+- `get_all_characters()`: 画像URLの読み取り位置を調整
+- `update_character_record()`: 画像URLの更新位置を調整
+
+#### 2. 画像URLの管理方法の改善
+
+**Before:**
+```python
+# 2カラムで管理
+row = [
+    character.id,
+    character.name,
+    character.image_path,      # C列: Image URL
+    character.sprite_path,     # D列: Sprite URL
+    character.hp,
+    ...
+]
+```
+
+**After:**
+```python
+# 3カラムで画像処理の各段階を管理
+row = [
+    character.id,
+    character.name,
+    character.image_path,           # C列: Original Image URL
+    character.transparent_sprite,   # D列: Transparent Sprite URL
+    character.sprite_path,          # E列: Masked Sprite URL
+    character.hp,
+    ...
+]
+```
+
+#### 3. 画像キャッシュシステムの更新
+
+**変更内容:**
+```python
+# src/services/sheets_manager.py - _download_and_cache_image()
+
+# 3種類の画像URLに対応
+if 'transparent_sprite_url' in kwargs:
+    cache_path = self.cache_dir / 'sprites_transparent' / filename
+elif 'sprite_url' in kwargs:
+    cache_path = self.cache_dir / 'sprites_masked' / filename
+elif 'image_url' in kwargs:
+    cache_path = self.cache_dir / 'originals' / filename
+```
+
+**キャッシュディレクトリ構造:**
+```
+data/cache/
+├── originals/              # 元画像（オリジナル）
+├── sprites_transparent/    # 透過処理済みスプライト
+└── sprites_masked/         # マスク適用済みスプライト
+```
+
+#### 4. PDF文書の作成
+
+**作成した文書:**
+- `SPREADSHEET_IMAGE_COLUMNS_CHANGE.pdf`
+- 英語で記述された詳細な変更記録
+- 以下の内容を含む:
+  - 変更の背景と理由
+  - 新旧カラム構造の比較
+  - 影響を受けるコードの詳細
+  - マイグレーション手順
+  - 既存データへの影響
+
+**文書の配置場所:**
+プロジェクトルートディレクトリ: `/home/satosho/Oekaki_Battler/OekakiBattler/SPREADSHEET_IMAGE_COLUMNS_CHANGE.pdf`
+
+### 技術的詳細
+
+#### カラムインデックスの変更
+
+| データ項目 | Before (Index) | After (Index) | 変更 |
+|-----------|---------------|---------------|------|
+| ID | 0 (A) | 0 (A) | 変更なし |
+| Name | 1 (B) | 1 (B) | 変更なし |
+| Image URL | 2 (C) | → Original Image URL: 2 (C) | 名称変更 |
+| Sprite URL | 3 (D) | → Transparent Sprite: 3 (D) | 新規追加 |
+| - | - | → Masked Sprite: 4 (E) | 旧Sprite URLから移動 |
+| HP | 4 (E) | 5 (F) | +1シフト |
+| Attack | 5 (F) | 6 (G) | +1シフト |
+| ... | ... | ... | 以降すべて+1 |
+
+#### データモデルへの影響
+
+**Character Model:**
+現時点では`src/models/character.py`のモデル定義は変更していません。今後、必要に応じて以下の拡張が可能です:
+
+```python
+class Character(BaseModel):
+    id: str
+    name: str
+    image_path: str              # Original image URL
+    transparent_sprite: str      # 新規フィールド候補
+    sprite_path: str             # Masked sprite URL
+    # ... 他のフィールド
+```
+
+### 互換性とマイグレーション
+
+**既存データへの影響:**
+- 既存のスプレッドシートは手動でヘッダーを更新する必要があります
+- または、新規にスプレッドシートを作成して自動的に新構造を適用
+- 既存キャラクターデータの`Transparent Sprite URL`カラムは空欄となる
+
+**推奨マイグレーション手順:**
+1. 既存スプレッドシートのバックアップを作成
+2. Charactersシートにカラムを挿入:
+   - C列の後ろに新しいカラムを追加（`Transparent Sprite URL`）
+   - 元の`Sprite URL`を`Masked Sprite URL`に名称変更
+3. アプリケーションを再起動して新構造を使用
+
+### 影響範囲
+
+**修正されたファイル:**
+- `src/services/sheets_manager.py` (主要な変更)
+  - `_ensure_worksheets_exist()`: ヘッダー定義
+  - `add_character()`: データ書き込み
+  - `get_all_characters()`: データ読み取り
+  - `update_character_record()`: データ更新
+  - `_download_and_cache_image()`: キャッシュ管理
+
+**影響を受けないファイル:**
+- `src/models/character.py` (モデル定義は現時点で変更なし)
+- バトルエンジン関連のコード
+- UI関連のコード（画像表示は既存のパスを使用）
+
+### テストと検証
+
+**推奨テスト項目:**
+1. 新規キャラクター登録時の3種類の画像URL保存
+2. 既存キャラクターの読み込み（後方互換性）
+3. 画像キャッシュの正しいディレクトリへの保存
+4. スプレッドシート上でのカラム位置の正確性
+5. 画像URLの更新処理
+
+### 今後の展望
+
+**可能な拡張:**
+1. 透過スプライトとマスクスプライトの自動生成
+2. UI上での画像プレビュー機能（3種類すべて）
+3. 画像再生成機能（透過処理のやり直し）
+4. キャラクターモデルへの`transparent_sprite`フィールドの正式追加
+
+### 関連文書
+
+- 詳細な英語版文書: `SPREADSHEET_IMAGE_COLUMNS_CHANGE.pdf`
+- プロジェクト概要: `CLAUDE.md`
+- スプレッドシート構造: `CLAUDE.md` - "Google Sheets Structure"セクション
+
+---
+
 ## 2025-10-09 (修正64): ステータス生成・検証ロジックの修正とデータ整合性の向上
 
 ### 変更内容
